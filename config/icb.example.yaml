@@ -1,0 +1,46 @@
+# ICB build configuration (example).
+# Copy to ./icb_build.yaml (picked up automatically) or pass with -c/--config.
+# Precedence: built-in defaults < this file < command-line flags.
+# root_dir is NOT allowed here: always pass it with -r/--root-dir.
+
+log_dir: logs              # relative to the tool repo unless absolute
+status_interval: 30        # seconds between status lines in plain (CI) mode
+ui: auto                   # auto | rich | ansi | plain
+
+stages:                    # every path is relative to --root-dir
+  tz:
+    path: snapdragon-auto-gen3-la/tz_8155/trustzone_images/build/ms
+  xbl:
+    path: snapdragon-auto-gen3-la/boot_8155/boot_images/QcomPkg
+  qssi:
+    path: snapdragon-auto-gen3-la/apps_qssi/LINUX/android
+    lunch_target: icbssi-userdebug        # or icbssi-user
+    jobs: 60                              # 1..60 (shared build server limit)
+  vendor:
+    path: snapdragon-auto-gen3-la/apps_vendor/LINUX/android
+    lunch_target: icb8155-userdebug       # or icb8155-user
+    jobs: 60                              # 1..60 (shared build server limit)
+    gki: false                            # true = GKI provided by the user
+    gki_version: ""                       # e.g. android14-6.1-2026-06_r6@16037590
+  super:
+    path: snapdragon-auto-gen3-la/apps_vendor/LINUX/android
+    target_lunch: msmnile_au              # --target_lunch of build_image_standalone.py
+    output_ota: false                     # true adds --output_ota
+    no_tmp: false                         # true adds --no_tmp
+  meta:
+    path: snapdragon-auto-gen3-la/common/build
+
+  # Optional on any stage:
+  #   script: scripts/<name>.sh     # which script to run (relative to the tool repo)
+  #   env:    { KEY: value }        # extra environment variables for that stage only
+  #
+  # Script settings that can be overridden through env (defaults shown):
+  #   tz:     TZ_BUILD_ID=TZ.XF.5.0  TZ_CHIPSET=sm8150
+  #   xbl:    XBL_ENV_SCRIPT=/opt/qcom-build-env/xbl-env.sh  XBL_VARIANT=AU
+  #           XBL_RELEASE=RELEASE  XBL_TARGETS=SDM855Pkg,QcomToolsPkg
+  #   vendor: VENDOR_ENV_SCRIPT=/opt/qcom-build-env/vendor-env.sh
+  #   meta:   META_FLAVORS=8155
+  # e.g.
+  #   meta:
+  #     path: snapdragon-auto-gen3-la/common/build
+  #     env: { META_FLAVORS: "8155" }

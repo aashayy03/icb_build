@@ -1,0 +1,34 @@
+{
+  "log_dir": "logs",
+  "status_interval": 30,
+  "ui": "auto",
+  "stages": {
+    "tz": {
+      "path": "snapdragon-auto-gen3-la/tz_8155/trustzone_images/build/ms"
+    },
+    "xbl": {
+      "path": "snapdragon-auto-gen3-la/boot_8155/boot_images/QcomPkg"
+    },
+    "qssi": {
+      "path": "snapdragon-auto-gen3-la/apps_qssi/LINUX/android",
+      "lunch_target": "icbssi-userdebug",
+      "jobs": 60
+    },
+    "vendor": {
+      "path": "snapdragon-auto-gen3-la/apps_vendor/LINUX/android",
+      "lunch_target": "icb8155-userdebug",
+      "jobs": 60,
+      "gki": false,
+      "gki_version": ""
+    },
+    "super": {
+      "path": "snapdragon-auto-gen3-la/apps_vendor/LINUX/android",
+      "target_lunch": "msmnile_au",
+      "output_ota": false,
+      "no_tmp": false
+    },
+    "meta": {
+      "path": "snapdragon-auto-gen3-la/common/build"
+    }
+  }
+}
