@@ -15,7 +15,7 @@ TOOL_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SOURCE_ROOT = "snapdragon-auto-gen3-la"
 
 # Hard cap on -j for qssi and vendor: the build server is shared.
-MAX_JOBS = 60
+MAX_JOBS = 90
 
 UI_MODES = ("auto", "rich", "ansi", "plain", "tui")
 DEFAULT_CONFIG_NAMES = ("icb_build.yaml", "icb_build.yml", "icb_build.json")
