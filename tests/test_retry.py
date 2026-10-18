@@ -1,5 +1,6 @@
 import os
 import threading
+import time
 import unittest
 
 from orchestrator.scheduler import EXIT_FAILED, EXIT_INTERRUPTED, EXIT_OK, Scheduler
@@ -30,6 +31,26 @@ class RecordingDisplay(QuietDisplay):
 
     def resume(self, stages):
         self.resumes += 1
+
+
+class RebuildingDisplay(RecordingDisplay):
+    """Interactive display stand-in: rebuilds one failed stage once, then quits."""
+
+    handles_retry = True
+
+    def __init__(self, stage, incremental):
+        super().__init__()
+        self.stage, self.incremental, self.done = stage, incremental, False
+
+    def wait(self, seconds):
+        ctrl = self.controller
+        if not self.done and ctrl.can_retry(self.stage):
+            ctrl.retry(self.stage, incremental=self.incremental)
+            self.done = True
+        time.sleep(seconds)
+
+    def holds_open(self):
+        return not self.done
 
 
 class RetryTests(WorkspaceTestCase):
@@ -75,6 +96,47 @@ class RetryTests(WorkspaceTestCase):
         self.assertIn("  ICB_CLEAN=1\n", latest)
         self.assertIn("result   : COMPLETED", latest)
         self.assertEqual(st["qssi"].log_path, os.path.join(self.run_dir, "qssi.log"))
+
+    def test_retry_in_incremental_run_is_full_clean_build(self):
+        os.environ["ICB_STUB_FAIL"] = "vendor"
+        prompt = FakePrompt(["vendor"])
+        sched, _ = self.run_with(self.resolve(incremental=True), prompt)
+        self.assertEqual(sched.statuses["vendor"].attempt, 2)
+        first = self.read("vendor.attempt1.log")
+        self.assertIn("build    : incremental", first)
+        self.assertIn("skipping kernel steps", first)
+        self.assertNotIn("prepare_vendor.sh gen3auto-alap", first)
+        retry = self.read("vendor.log")
+        self.assertIn("build    : full", retry)
+        self.assertIn("  ICB_INCREMENTAL=0\n", retry)
+        self.assertIn("+ rm -rf -- ", retry)  # clean step
+        self.assertIn("prepare_vendor.sh gen3auto-alap gki", retry)  # kernel steps back
+
+    def test_incremental_rebuild_keeps_out_and_unblocks(self):
+        script = self.write_script("flaky_vendor.sh", (
+            'echo "clean=$ICB_CLEAN incremental=$ICB_INCREMENTAL"\n'
+            '[ "$ICB_ATTEMPT" -ge 2 ] || exit 2\n'))
+        cfg = self.resolve(overrides={"stages": {"vendor": {"script": script}}})
+        display = RebuildingDisplay("vendor", incremental=True)
+        sched = Scheduler(cfg, "test-run", self.run_dir, display, poll_interval=0.05,
+                          retry_prompt=FakePrompt(["vendor"]))
+        self.assertEqual(sched.run(), EXIT_OK)
+        st = sched.statuses
+        self.assertEqual((st["vendor"].state, st["vendor"].attempt, st["vendor"].rebuild),
+                         (StageState.COMPLETED, 2, "incremental"))
+        self.assertEqual(st["meta"].state, StageState.COMPLETED)
+        self.assertIn("clean=0 incremental=0", self.read("vendor.attempt1.log"))
+        latest = self.read("vendor.log")
+        self.assertIn("attempt  : 2 (incremental rebuild)", latest)
+        self.assertIn("clean=0 incremental=1", latest)
+
+    def test_incremental_rebuild_refused_for_other_stages(self):
+        os.environ["ICB_STUB_FAIL"] = "tz"
+        sched, _ = self.run_with(self.resolve(), None)
+        self.assertTrue(sched.can_retry("tz"))
+        self.assertFalse(sched.can_retry_incremental("tz"))
+        with self.assertRaises(ValueError):
+            sched.retry("tz", incremental=True)
 
     def test_declining_keeps_failure(self):
         prompt = FakePrompt([])

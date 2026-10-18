@@ -60,6 +60,9 @@ def build_parser() -> argparse.ArgumentParser:
                      help="run all stages except these (comma-separated)")
     p.add_argument("--dry-run", action="store_true",
                    help="print the resolved config and per-stage commands, run nothing")
+    p.add_argument("--incremental", action="store_true",
+                   help="incremental qssi/vendor build: keep out/, and skip vendor's kernel "
+                        "steps (gki-fetch, prepare_vendor.sh); other stages build as usual")
     p.add_argument("--stub", action="store_true",
                    help="run the pipeline with every build command logged but not run "
                         "(ICB_STUB=1), to check orchestration without building")
@@ -135,6 +138,8 @@ def print_dry_run(cfg: Config, out=None) -> None:
     w("Display:     %s (resolved: %s)\n" % (cfg.ui, resolve_mode(cfg.ui, sys.stdout)))
     if cfg.stub:
         w("Stub mode:   on (scripts log their commands instead of running them)\n")
+    w("Build mode:  %s\n" % ("incremental (qssi/vendor keep out/, vendor kernel steps skipped)"
+                             if cfg.incremental else "full"))
     w("\nResolved configuration:\n")
     w(json.dumps(cfg.to_dict(), indent=2) + "\n")
     w("\nStage plan:\n")
@@ -196,6 +201,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             skip=args.skip,
             dry_run=args.dry_run,
             stub=args.stub,
+            incremental=args.incremental,
         )
     except ConfigError as exc:
         for line in str(exc).splitlines():

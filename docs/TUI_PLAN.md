@@ -118,3 +118,20 @@ Additions to `orchestrator/display/base.py`. The defaults keep the existing disp
 ## Decided after implementation
 - **Show the vendor GKI mode and lunch targets in the header?** Yes. The second header line shows the QSSI and Vendor lunch targets and the GKI mode (user-provided plus its version, or not provided).
 - **Add a "retry all failed" key?** No. Retries are one stage at a time with `r`.
+
+## Incremental build in the TUI (implemented)
+- **Header:** the second line ends with `build: incremental` or `build: full`.
+- **`i` key:**
+  - Works on a FAILED **qssi or vendor** stage.
+  - It asks `Incremental rebuild of vendor (keeps out/, skips kernel steps)? (y/n)`; for qssi the question says only `keeps out/`.
+  - It re-runs the stage as the next attempt **without cleaning** (`ICB_CLEAN=0`, `ICB_INCREMENTAL=1`).
+  - The log header shows `attempt  : 2 (incremental rebuild)` and `build    : incremental`.
+  - On other stages, or stages that aren't FAILED, it explains why it can't run.
+- **`r`** stays a full clean retry, including the vendor kernel steps, even in an `--incremental` run.
+- **Dependents:** stages blocked by the failure go back to PENDING, the same as for `r`.
+- **Logs:** earlier attempts are kept as `<stage>.attempt<N>.log`.
+- **Scheduler:**
+  - `retry(name, incremental=False)` and `can_retry_incremental(name)`.
+  - `StageStatus.rebuild` records how the current attempt runs (`"clean"` or `"incremental"`), and `Config.stage_env(..., rebuild=...)` turns it into `ICB_CLEAN` / `ICB_INCREMENTAL`.
+- **Help and footer** list `i`. The finished banner says `On a FAILED stage: r retry, i incremental.`
+- **The CLI end-of-run prompt** still offers only the clean retry.

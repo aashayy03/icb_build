@@ -80,6 +80,49 @@ class ConfigTests(WorkspaceTestCase):
             "stages": {"super": {"output_ota": "sometimes"}}
         })
 
+    def test_incremental_env(self):
+        full = self.resolve()
+        self.assertFalse(full.incremental)
+        self.assertEqual(full.stage_env("vendor", "R", "/l")["ICB_INCREMENTAL"], "0")
+        inc = self.resolve(incremental=True)
+        self.assertTrue(inc.to_dict()["incremental"])
+        for stage in ("qssi", "vendor"):
+            self.assertEqual(inc.stage_env(stage, "R", "/l")["ICB_INCREMENTAL"], "1")
+        for stage in ("tz", "xbl", "super", "meta"):  # their build doesn't change
+            self.assertEqual(inc.stage_env(stage, "R", "/l")["ICB_INCREMENTAL"], "0")
+        # a retry is always a full clean build
+        retry = inc.stage_env("vendor", "R", "/l", attempt=2)
+        self.assertEqual((retry["ICB_INCREMENTAL"], retry["ICB_CLEAN"]), ("0", "1"))
+
+    def test_rebuild_modes_env(self):
+        full = self.resolve()
+        inc_rebuild = full.stage_env("vendor", "R", "/l", attempt=2, rebuild="incremental")
+        self.assertEqual((inc_rebuild["ICB_CLEAN"], inc_rebuild["ICB_INCREMENTAL"]), ("0", "1"))
+        clean = full.stage_env("vendor", "R", "/l", attempt=3, rebuild="clean")
+        self.assertEqual((clean["ICB_CLEAN"], clean["ICB_INCREMENTAL"]), ("1", "0"))
+        # an incremental run's clean retry is still a full build
+        inc_run = self.resolve(incremental=True)
+        retry = inc_run.stage_env("qssi", "R", "/l", attempt=2, rebuild="clean")
+        self.assertEqual((retry["ICB_CLEAN"], retry["ICB_INCREMENTAL"]), ("1", "0"))
+
+    def test_incremental_respects_stage_selection(self):
+        cfg = self.resolve(incremental=True, only=["qssi", "vendor"])
+        self.assertEqual(cfg.selected, ["qssi", "vendor"])
+        self.assertEqual(cfg.warnings, [])
+        cfg = self.resolve(incremental=True, skip=["tz", "xbl"])
+        self.assertEqual(cfg.selected, ["qssi", "vendor", "super", "meta"])
+
+    def test_incremental_without_qssi_or_vendor_warns(self):
+        cfg = self.resolve(incremental=True, only=["tz", "meta"])
+        self.assertTrue(any("--incremental only affects qssi and vendor" in w
+                            for w in cfg.warnings))
+        self.assertFalse(any("--incremental" in w for w in self.resolve(only=["tz"]).warnings))
+
+    def test_incremental_still_validates_gki(self):
+        # a retry inside an incremental run is a full build that uses the GKI settings
+        self.assertConfigError("gki is true but no GKI version", incremental=True,
+                               overrides={"stages": {"vendor": {"gki": True}}})
+
     def test_stub_flag_is_always_passed(self):
         self.assertEqual(self.resolve(stub=False).stage_env("tz", "R", "/l")["ICB_STUB"], "0")
         self.assertEqual(self.resolve(stub=True).stage_env("tz", "R", "/l")["ICB_STUB"], "1")
@@ -241,8 +284,8 @@ class ConfigTests(WorkspaceTestCase):
         tz = cfg.stage_env("tz", "RID", "/logs/RID")
         self.assertEqual(
             sorted(tz),
-            ["ICB_ATTEMPT", "ICB_CLEAN", "ICB_LOG_DIR", "ICB_ROOT_DIR", "ICB_RUN_ID",
-             "ICB_STAGE", "ICB_STAGE_DIR", "ICB_STUB"],
+            ["ICB_ATTEMPT", "ICB_CLEAN", "ICB_INCREMENTAL", "ICB_LOG_DIR", "ICB_ROOT_DIR",
+             "ICB_RUN_ID", "ICB_STAGE", "ICB_STAGE_DIR", "ICB_STUB"],
         )
         self.assertEqual((tz["ICB_ATTEMPT"], tz["ICB_CLEAN"]), ("1", "0"))
         retry = cfg.stage_env("tz", "RID", "/logs/RID", attempt=3)

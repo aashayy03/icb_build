@@ -29,7 +29,7 @@ TABLE_TOP = 3
 # Stage table columns: marker+name, state, attempt, elapsed, then last output.
 COL_STATE, COL_ATT, COL_ELAPSED, COL_DETAIL = 11, 22, 27, 37
 
-MAIN_KEYS = "Up/Down select  Enter view log  r retry  c cancel run  q quit  ? help"
+MAIN_KEYS = "Up/Down select  Enter log  r retry  i incremental  c cancel  q quit  ? help"
 VIEWER_KEYS = "Up/Down PgUp/PgDn scroll  g/G top/bottom  f follow  / search  n/N next/prev  q back"
 HELP_LINES = [
     "ICB build TUI - keys",
@@ -38,6 +38,8 @@ HELP_LINES = [
     "  Up/Down, k/j    select a stage",
     "  Enter           open the selected stage's log",
     "  r               clean and retry the selected FAILED stage",
+    "  i               incremental rebuild of a FAILED qssi/vendor stage",
+    "                  (keeps out/; vendor skips the kernel steps)",
     "  c               cancel the run (stops running stages)",
     "  q               quit (asks first if stages are still running)",
     "  Ctrl+C          cancel the run; press again to force kill",
@@ -170,6 +172,8 @@ class TuiDisplay(Display):
             self._open_viewer()
         elif key == ord("r"):
             self._ask_retry()
+        elif key == ord("i"):
+            self._ask_incremental()
         elif key == ord("c"):
             self._ask_cancel()
         elif key == ord("q"):
@@ -209,14 +213,33 @@ class TuiDisplay(Display):
         else:
             self._say("%s is %s: only FAILED stages can be retried" % (s.name, s.state.value))
 
-    def _do_retry(self, name: str) -> None:
+    def _ask_incremental(self) -> None:
+        s, ctrl = self._current(), self.controller
+        if s is None or ctrl is None:
+            return
+        if ctrl.can_retry_incremental(s.name):
+            what = "keeps out/, skips kernel steps" if s.name == "vendor" else "keeps out/"
+            self.confirm = ("Incremental rebuild of %s (%s)? (y/n)" % (s.name, what),
+                            lambda: self._do_retry(s.name, incremental=True))
+        elif s.name not in ("qssi", "vendor"):
+            self._say("incremental rebuild is only for qssi and vendor (use r to retry %s)"
+                      % s.name)
+        elif ctrl.interrupted:
+            self._say("the run was cancelled: rebuild is not available")
+        else:
+            self._say("%s is %s: only FAILED stages can be rebuilt" % (s.name, s.state.value))
+
+    def _do_retry(self, name: str, incremental: bool = False) -> None:
         try:
-            self.controller.retry(name)
+            self.controller.retry(name, incremental=incremental)
         except (ValueError, OSError) as exc:
             self._say("retry failed: %s" % exc)
             return
         attempt = next(s.attempt for s in self.stages if s.name == name)
-        self._say("%s queued for retry (attempt %d, clean before build)" % (name, attempt))
+        if incremental:
+            self._say("%s queued for incremental rebuild (attempt %d, out/ kept)" % (name, attempt))
+        else:
+            self._say("%s queued for retry (attempt %d, clean before build)" % (name, attempt))
 
     def _ask_cancel(self) -> None:
         ctrl = self.controller
@@ -334,7 +357,9 @@ class TuiDisplay(Display):
             gki = "user-provided %s" % vendor.gki_version
         else:
             gki = "not provided"
-        return " lunch: qssi %s, vendor %s   GKI: %s" % (qssi.lunch_target, vendor.lunch_target, gki)
+        build = "incremental" if getattr(cfg, "incremental", False) else "full"
+        return " lunch: qssi %s, vendor %s   GKI: %s   build: %s" % (
+            qssi.lunch_target, vendor.lunch_target, gki, build)
 
     def _draw_main(self, h: int, w: int) -> None:
         header = " ICB build  run %s  elapsed %s%s  logs %s" % (
@@ -388,7 +413,8 @@ class TuiDisplay(Display):
             can_retry = self.controller is not None and any(
                 self.controller.can_retry(s.name) for s in self.stages)
             if can_retry:
-                return "Run finished: %s. Select a FAILED stage and press r to retry, or q to quit." % result
+                return ("Run finished: %s. On a FAILED stage: r retry, i incremental. q quits."
+                        % result)
             return "Run finished: %s. Press q to quit." % result
         return ""
 
