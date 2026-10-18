@@ -63,16 +63,6 @@ def _user() -> str:
         return "?"
 
 
-def _attempt_note(attempt: int, passed_env: Dict[str, str]) -> str:
-    if attempt <= 1:
-        return ""
-    if passed_env.get("ICB_CLEAN") == "1":
-        return " (clean before build)"
-    if passed_env.get("ICB_INCREMENTAL") == "1":
-        return " (incremental rebuild)"
-    return ""
-
-
 def format_header(
     stage: str,
     run_id: str,
@@ -89,7 +79,7 @@ def format_header(
         "host     : %s  (user: %s)" % (socket.gethostname(), _user()),
         "command  : %s" % " ".join(command),
         "cwd      : %s" % cwd,
-        "attempt  : %d%s" % (attempt, _attempt_note(attempt, passed_env)),
+        "attempt  : %d%s" % (attempt, " (clean before build)" if attempt > 1 else ""),
         "build    : %s" % ("incremental" if passed_env.get("ICB_INCREMENTAL") == "1" else "full"),
         "env      :",
     ]

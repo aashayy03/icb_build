@@ -523,7 +523,8 @@ Clean and retry qssi? [y/N]
 
 ## 14. Incremental build (`--incremental`)
 
-> Status: **implemented, CLI and TUI.** The TUI part (the header's `build:` field and the `i` key) is described in `docs/TUI_PLAN.md` ("Incremental build in the TUI").
+> Status: **implemented.** `--incremental` is chosen on the command line and works with every display, including `--ui tui`. The TUI header shows `build: incremental` / `full`.
+> An `i` key for incremental rebuilds inside the TUI was built and then **removed at the user's request**: incremental is a command-line choice only.
 
 ### What it does
 `--incremental` rebuilds **QSSI and Vendor without deleting `out/`**. Each stage still runs in a new shell, as always, so its env setup runs again.

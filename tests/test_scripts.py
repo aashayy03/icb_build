@@ -104,19 +104,6 @@ class ScriptTests(WorkspaceTestCase):
                 self.assertIn("incremental build: reusing out/, skipping kernel steps", out)
                 self.assertNotIn("rm -rf", out)
 
-    def test_vendor_incremental_rebuild_attempt(self):
-        cfg = self.resolve()
-        code, out = self.run_stage("vendor", cfg, {"ICB_ATTEMPT": "2", "ICB_CLEAN": "0",
-                                                   "ICB_INCREMENTAL": "1"})
-        self.assertEqual(code, 0, out)
-        self.assertNotIn("rm -rf", out)
-        self.assertEqual(self.commands(out), [
-            "source /opt/qcom-build-env/vendor-env.sh (if present)",
-            "source build/envsetup.sh",
-            "lunch board-userdebug",
-            "bash build.sh -j9 dist --target_only",
-        ])
-
     def test_qssi_incremental_runs_same_commands(self):
         _, full = self.run_stage("qssi", self.resolve())
         code, inc = self.run_stage("qssi", self.resolve(incremental=True))

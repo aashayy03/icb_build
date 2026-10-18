@@ -22,12 +22,6 @@ DEPENDENCIES = {
 }  # type: Dict[str, List[str]]
 
 
-# How a FAILED stage is re-run (Scheduler.retry): a clean full build (r / the
-# end-of-run prompt), or an incremental rebuild of qssi/vendor (TUI `i` key).
-REBUILD_CLEAN = "clean"
-REBUILD_INCREMENTAL = "incremental"
-
-
 class StageState(Enum):
     PENDING = "PENDING"
     RUNNING = "RUNNING"
@@ -64,7 +58,6 @@ class StageStatus:
     log_path: Optional[str] = None
     note: str = ""
     attempt: int = 1  # incremented by Scheduler.retry()
-    rebuild: str = ""  # how the current attempt re-runs: "", REBUILD_CLEAN or REBUILD_INCREMENTAL
 
     def elapsed(self, now: Optional[float] = None) -> Optional[float]:
         if self.started_at is None:

@@ -181,7 +181,8 @@ python3 icb_build.py -r /mnt/icb_ws --incremental --only qssi,vendor     # just 
 
 - `--only`/`--skip` decide which stages run, as usual. `--incremental` only changes how qssi and vendor build.
 - There's no check that a previous build exists. If `out/` (or the kernel output) is missing, the build fails the normal way.
-- **A retry is still a full clean build**, including the kernel steps. In the TUI you can choose instead: `r` for a clean retry, or `i` for an incremental rebuild of a failed qssi/vendor stage.
+- **A retry is still a full clean build**, including the kernel steps.
+- Works with every display, including the TUI: `--incremental --ui tui`. Incremental builds are chosen only on the command line; the TUI has no incremental key.
 - The stage log header shows `build    : incremental` or `full`.
 - `--incremental` is a command-line flag only; it can't be set in the config file.
 
@@ -205,7 +206,6 @@ It's opt-in: `--ui auto` never picks it, and it needs a real terminal (exit 2 ot
 | Up/Down, k/j | select a stage (the log pane follows the selection) |
 | Enter | open the selected stage's log full screen |
 | r | clean and retry the selected FAILED stage (asks y/n) |
-| i | incremental rebuild of a FAILED qssi/vendor stage: keeps `out/`, vendor skips the kernel steps (asks y/n) |
 | c | cancel the run (asks y/n), same as Ctrl+C |
 | q | quit (asks to cancel first if stages are still running) |
 | ? | help |
