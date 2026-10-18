@@ -1,0 +1,32 @@
+# ICB build configuration (example).
+# Copy to ./icb_build.yaml (picked up automatically) or pass with -c/--config.
+# Precedence: built-in defaults < this file < command-line flags.
+# root_dir is NOT allowed here: always pass it with -r/--root-dir.
+
+log_dir: logs              # relative to the tool repo unless absolute
+status_interval: 15        # seconds between status lines in plain (CI) mode
+ui: auto                   # auto | rich | ansi | plain
+
+stages:                    # every path is relative to --root-dir
+  tz:
+    path: snapdragon-auto-gen3-la/tz_8155/trustzone_images/build/ms
+  xbl:
+    path: snapdragon-auto-gen3-la/boot_8155/boot_images/QcomPkg
+  qssi:
+    path: snapdragon-auto-gen3-la/apps_qssi/LINUX/android
+    lunch_target: icbssi-userdebug       
+    jobs: 60                              
+  vendor:
+    path: snapdragon-auto-gen3-la/apps_vendor/LINUX/android
+    lunch_target: icb8155-userdebug       
+    jobs: 60                              
+    gki: false                            
+    gki_version: "android14-6.1-2026-06_r6@16037590"
+  super:
+    path: snapdragon-auto-gen3-la/apps_vendor/LINUX/android
+    target_lunch: msmnile_au             
+    output_ota: false                     
+    no_tmp: false                         
+  meta:
+    path: snapdragon-auto-gen3-la/common/build
+
