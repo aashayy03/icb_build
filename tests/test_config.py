@@ -94,17 +94,6 @@ class ConfigTests(WorkspaceTestCase):
         retry = inc.stage_env("vendor", "R", "/l", attempt=2)
         self.assertEqual((retry["ICB_INCREMENTAL"], retry["ICB_CLEAN"]), ("0", "1"))
 
-    def test_rebuild_modes_env(self):
-        full = self.resolve()
-        inc_rebuild = full.stage_env("vendor", "R", "/l", attempt=2, rebuild="incremental")
-        self.assertEqual((inc_rebuild["ICB_CLEAN"], inc_rebuild["ICB_INCREMENTAL"]), ("0", "1"))
-        clean = full.stage_env("vendor", "R", "/l", attempt=3, rebuild="clean")
-        self.assertEqual((clean["ICB_CLEAN"], clean["ICB_INCREMENTAL"]), ("1", "0"))
-        # an incremental run's clean retry is still a full build
-        inc_run = self.resolve(incremental=True)
-        retry = inc_run.stage_env("qssi", "R", "/l", attempt=2, rebuild="clean")
-        self.assertEqual((retry["ICB_CLEAN"], retry["ICB_INCREMENTAL"]), ("1", "0"))
-
     def test_incremental_respects_stage_selection(self):
         cfg = self.resolve(incremental=True, only=["qssi", "vendor"])
         self.assertEqual(cfg.selected, ["qssi", "vendor"])

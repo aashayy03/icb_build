@@ -243,19 +243,9 @@ class Config:
     incremental: bool = False  # --incremental: qssi/vendor keep out/, vendor skips kernel steps
 
     def stage_env(
-        self, name: str, run_id: str, run_dir: str, attempt: int = 1, rebuild: str = ""
+        self, name: str, run_id: str, run_dir: str, attempt: int = 1
     ) -> Dict[str, str]:
-        """Variables passed to a stage's script (and printed in its log header).
-
-        rebuild is how a re-run attempt builds: "clean" (delete output, full build)
-        or "incremental" (qssi/vendor only: keep out/, vendor skips kernel steps).
-        """
-        if not rebuild and attempt > 1:
-            rebuild = "clean"  # a plain retry is a clean full build
-        if rebuild:
-            incremental = rebuild == "incremental" and name in INCREMENTAL_STAGES
-        else:
-            incremental = self.incremental and name in INCREMENTAL_STAGES
+        """Variables passed to a stage's script (and printed in its log header)."""
         stage = self.stages[name]
         qssi, vendor = self.stages["qssi"], self.stages["vendor"]
         env = {
@@ -266,12 +256,13 @@ class Config:
             "ICB_RUN_ID": run_id,
             # Always passed, so an ICB_STUB exported in the user's shell can't leak in.
             "ICB_STUB": "1" if self.stub else "0",
-            # A clean retry asks the script to delete the stage's output first.
+            # A retry (attempt > 1) asks the script to clean the stage's output first.
             "ICB_ATTEMPT": str(attempt),
-            "ICB_CLEAN": "1" if rebuild == "clean" else "0",
-            # Only qssi/vendor build differently: on the first attempt of an
-            # --incremental run, or on an incremental rebuild (TUI `i`).
-            "ICB_INCREMENTAL": "1" if incremental else "0",
+            "ICB_CLEAN": "1" if attempt > 1 else "0",
+            # Only qssi/vendor build differently, and only on the first attempt:
+            # a retry is always a full clean build.
+            "ICB_INCREMENTAL": "1" if (self.incremental and attempt == 1
+                                       and name in INCREMENTAL_STAGES) else "0",
         }
         qssi_vars = {
             "QSSI_LUNCH_TARGET": qssi.lunch_target,
