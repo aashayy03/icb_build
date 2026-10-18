@@ -32,6 +32,9 @@ EXTRA_STAGE_KEYS = {
 # (super lunches the vendor target before merging).
 LUNCH_NEEDED_BY = {"qssi": ["qssi"], "vendor": ["vendor", "super"]}
 
+# Stages whose build changes with --incremental (the others always build the same way).
+INCREMENTAL_STAGES = ("qssi", "vendor")
+
 # Which CLI flag sets a config key; used to make error messages actionable.
 CLI_FLAGS = {
     ("qssi", "jobs"): "--qssi-jobs",
@@ -237,11 +240,22 @@ class Config:
     selected: List[str]
     warnings: List[str] = field(default_factory=list)
     stub: bool = False  # --stub: scripts log commands instead of running them
+    incremental: bool = False  # --incremental: qssi/vendor keep out/, vendor skips kernel steps
 
     def stage_env(
-        self, name: str, run_id: str, run_dir: str, attempt: int = 1
+        self, name: str, run_id: str, run_dir: str, attempt: int = 1, rebuild: str = ""
     ) -> Dict[str, str]:
-        """Variables passed to a stage's script (and printed in its log header)."""
+        """Variables passed to a stage's script (and printed in its log header).
+
+        rebuild is how a re-run attempt builds: "clean" (delete output, full build)
+        or "incremental" (qssi/vendor only: keep out/, vendor skips kernel steps).
+        """
+        if not rebuild and attempt > 1:
+            rebuild = "clean"  # a plain retry is a clean full build
+        if rebuild:
+            incremental = rebuild == "incremental" and name in INCREMENTAL_STAGES
+        else:
+            incremental = self.incremental and name in INCREMENTAL_STAGES
         stage = self.stages[name]
         qssi, vendor = self.stages["qssi"], self.stages["vendor"]
         env = {
@@ -252,9 +266,12 @@ class Config:
             "ICB_RUN_ID": run_id,
             # Always passed, so an ICB_STUB exported in the user's shell can't leak in.
             "ICB_STUB": "1" if self.stub else "0",
-            # A retry (attempt > 1) asks the script to clean the stage's output first.
+            # A clean retry asks the script to delete the stage's output first.
             "ICB_ATTEMPT": str(attempt),
-            "ICB_CLEAN": "1" if attempt > 1 else "0",
+            "ICB_CLEAN": "1" if rebuild == "clean" else "0",
+            # Only qssi/vendor build differently: on the first attempt of an
+            # --incremental run, or on an incremental rebuild (TUI `i`).
+            "ICB_INCREMENTAL": "1" if incremental else "0",
         }
         qssi_vars = {
             "QSSI_LUNCH_TARGET": qssi.lunch_target,
@@ -311,6 +328,7 @@ class Config:
             "ui": self.ui,
             "selected": list(self.selected),
             "stub": self.stub,
+            "incremental": self.incremental,
             "stages": stages,
         }
 
@@ -330,6 +348,7 @@ def resolve(
     dry_run: bool = False,
     stub: bool = False,
     cwd: Optional[str] = None,
+    incremental: bool = False,
 ) -> Config:
     """Merge all config layers, validate them and return a typed Config.
 
@@ -487,6 +506,10 @@ def resolve(
     if errors:
         raise ConfigError("\n".join(errors))
 
+    if incremental and not set(INCREMENTAL_STAGES) & set(selected):
+        warnings.append("--incremental only affects %s; neither is selected"
+                        % " and ".join(INCREMENTAL_STAGES))
+
     return Config(
         root_dir=root,
         config_file=config_path,
@@ -497,4 +520,5 @@ def resolve(
         selected=selected,
         warnings=warnings,
         stub=stub,
+        incremental=incremental,
     )

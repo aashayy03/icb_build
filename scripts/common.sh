@@ -14,6 +14,9 @@
 #
 # Retries: when a failed stage is retried, the orchestrator sets ICB_ATTEMPT=<n>
 # and ICB_CLEAN=1; each script then runs its clean block before building.
+#
+# Incremental builds (--incremental): ICB_INCREMENTAL=1; qssi/vendor keep out/ and
+# vendor skips its kernel steps (see icb_incremental).
 
 icb_log() {
     printf '[%s] [%s] %s\n' "$(date '+%H:%M:%S')" "${ICB_STAGE:-?}" "$*"
@@ -122,6 +125,13 @@ icb_lunch() {
 # for attempt > 1): the script must clean the stage's output before rebuilding.
 icb_clean_requested() {
     [[ "${ICB_CLEAN:-0}" == 1 ]]
+}
+
+# icb_incremental  -- true for an incremental build (icb_build.py --incremental sets
+# ICB_INCREMENTAL=1 on the first attempt of qssi/vendor): keep out/ and skip
+# steps that can't build incrementally. Retries always get ICB_INCREMENTAL=0.
+icb_incremental() {
+    [[ "${ICB_INCREMENTAL:-0}" == 1 ]]
 }
 
 # icb_remove_dir DIR  -- delete a build output directory for a retry clean.

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+import os
 import sys
 import time
 from typing import List, Optional, TextIO
@@ -134,3 +136,67 @@ class Display:
     def _print(self, text: str) -> None:
         self.stream.write(text + "\n")
         self.stream.flush()
+
+
+class GuardedDisplay:
+    """Wraps the scheduler's display so a dead output never takes the build down.
+
+    If writing fails (a closed pipe such as `| head`, a terminal that went away),
+    the display is switched off, stdout is pointed at /dev/null, and the build
+    continues; orchestrator.log and the stage logs still record everything.
+    """
+
+    def __init__(self, inner: Display) -> None:
+        self.inner = inner
+        self.dead = False
+
+    @property
+    def handles_retry(self) -> bool:
+        return self.inner.handles_retry and not self.dead
+
+    def attach(self, controller) -> None:
+        self.inner.attach(controller)
+
+    def _call(self, name: str, *args) -> None:
+        if self.dead:
+            return
+        try:
+            getattr(self.inner, name)(*args)
+        except OSError as exc:
+            self._die(exc)
+
+    def _die(self, exc: OSError) -> None:
+        self.dead = True
+        logging.getLogger("icb_build").warning(
+            "display output failed (%s); continuing without terminal output", exc)
+        try:
+            devnull = os.open(os.devnull, os.O_WRONLY)
+            os.dup2(devnull, self.inner.stream.fileno())
+            os.close(devnull)
+        except (OSError, AttributeError, ValueError):
+            pass
+
+    def start(self, stages: List[StageStatus]) -> None:
+        self._call("start", stages)
+
+    def update(self, stages: List[StageStatus]) -> None:
+        self._call("update", stages)
+
+    def message(self, text: str) -> None:
+        self._call("message", text)
+
+    def stop(self, stages: List[StageStatus], interrupted: bool = False) -> None:
+        self._call("stop", stages, interrupted)
+
+    def resume(self, stages: List[StageStatus]) -> None:
+        self._call("resume", stages)
+
+    def wait(self, seconds: float) -> None:
+        if self.dead:
+            time.sleep(seconds)
+        else:
+            self._call("wait", seconds)
+
+    def holds_open(self) -> bool:
+        # With no terminal left, nobody can press q: let the run end when stages finish.
+        return not self.dead and self.inner.holds_open()

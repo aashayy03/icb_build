@@ -98,6 +98,32 @@ class SchedulerTests(WorkspaceTestCase):
         self.assertIn("result   : FAILED", log)
 
 
+class BrokenDisplay(QuietDisplay):
+    """Output that dies after a few updates, like a pipe whose reader went away."""
+
+    def __init__(self):
+        super().__init__()
+        self.updates = 0
+
+    def update(self, stages):
+        self.updates += 1
+        if self.updates > 3:
+            raise BrokenPipeError(32, "Broken pipe")
+
+    def stop(self, stages, interrupted=False):
+        raise BrokenPipeError(32, "Broken pipe")
+
+
+class DeadOutputTests(WorkspaceTestCase):
+    def test_build_continues_when_display_output_dies(self):
+        display = BrokenDisplay()
+        sched = Scheduler(self.resolve(), "test-run", self.run_dir, display, poll_interval=0.05)
+        self.assertEqual(sched.run(), EXIT_OK)
+        self.assertTrue(all(s.state is StageState.COMPLETED for s in sched.statuses.values()))
+        self.assertTrue(sched.display.dead)
+        self.assertEqual(display.updates, 4)  # no more calls after the failure
+
+
 class CancelTests(WorkspaceTestCase):
     stub_sleep = "30"
 

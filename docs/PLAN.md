@@ -518,3 +518,73 @@ Clean and retry qssi? [y/N]
   - `out` is never a symlink, so `rm -rf` removes the real output.
   - The env scripts set `OUT_DIR`, but it's always `out`, so there's no separate `OUT_DIR` to clean.
 - A full delete of `out/` means the retried QSSI/Vendor build starts from scratch, so expect a full build time.
+
+---
+
+## 14. Incremental build (`--incremental`)
+
+> Status: **implemented, CLI and TUI.** The TUI part (the header's `build:` field and the `i` key) is described in `docs/TUI_PLAN.md` ("Incremental build in the TUI").
+
+### What it does
+`--incremental` rebuilds **QSSI and Vendor without deleting `out/`**. Each stage still runs in a new shell, as always, so its env setup runs again.
+
+| Stage | Normal build | `--incremental` |
+|---|---|---|
+| qssi | envsetup → lunch → `build.sh -j N dist --qssi_only` | **same commands** (out/ was never deleted on a normal build either) |
+| vendor | vendor-env.sh (if present) → envsetup → lunch → gki-fetch (GKI only) → `prepare_vendor.sh` → `build.sh -j N dist --target_only` | vendor-env.sh (if present) → envsetup → lunch → `build.sh -j N dist --target_only`. **The kernel steps (gki-fetch, prepare_vendor.sh) are skipped** because the kernel has no incremental build |
+| tz, xbl, super, meta | unchanged | unchanged |
+
+- **Stage selection is separate from this flag.**
+  - `--incremental` alone runs the full pipeline: TZ, XBL, QSSI (incremental), Vendor (incremental), Super, Meta.
+  - With `--only`/`--skip`, only the selected stages run. For example, `--incremental --only qssi,vendor,super,meta` reuses the existing TZ/XBL output.
+- **No `out/` checks.** The tool doesn't verify that a previous build exists. An incremental Vendor build with no earlier kernel output fails in `build.sh` like any other build failure.
+
+### Retry inside an incremental run
+A retry (`[y/N]` prompt now, `r` in the TUI) stays a **full clean build**. It deletes `out/` (Vendor: both out dirs) and runs every command, **including the kernel steps**. The orchestrator therefore passes `ICB_INCREMENTAL=0` for attempts after the first.
+
+### Design
+- **CLI:** `--incremental` (`store_true`). It is a per-run choice like `--stub`, so it can't be set in the config file.
+- **Config** (`config.py`):
+  - `Config.incremental: bool`
+  - `stage_env()` passes `ICB_INCREMENTAL=1` to **qssi and vendor** on attempt 1 of an incremental run. Every other case gets `0`, including other stages, whose build doesn't change, and retries. It's always passed explicitly, so a value exported in the user's shell can't leak in.
+  - `to_dict()` / `resolved_config.json` include `incremental`.
+- **Scripts:**
+  - `common.sh`: new `icb_incremental()` helper.
+  - `vendor.sh`: in incremental mode, skip gki-fetch and prepare_vendor.sh and log `incremental build: skipping kernel steps (gki-fetch, prepare_vendor.sh)`.
+  - `qssi.sh`: commands unchanged, plus one log line: `incremental build: reusing out/`.
+- **Log header:** a new line, `build    : incremental` (qssi/vendor in an incremental run) or `build    : full` (all other cases).
+- **Run start:**
+  - like stub mode, a message `INCREMENTAL BUILD: qssi/vendor reuse out/, vendor kernel steps skipped` goes to the display and `orchestrator.log`
+  - `--dry-run` shows `Build mode: incremental`
+- **GKI flags:** still validated as today (`--gki true` needs `--gki-version`), because a retry in an incremental run is a full build that uses them.
+- **Warning:** `--incremental` without qssi or vendor selected (e.g. `--only tz`) prints `warning: --incremental only affects qssi and vendor; neither is selected` and the run continues.
+
+### Files
+- `orchestrator/cli.py`: the flag, dry-run line, run-start message
+- `orchestrator/config.py`: `incremental`, env and warning
+- `orchestrator/runner.py`: header line
+- `orchestrator/scheduler.py`: start message
+- `scripts/common.sh`, `scripts/vendor.sh`, `scripts/qssi.sh`
+- `README.md`, this section
+- tests:
+  - `test_config.py`: env values, retry attempts get 0, the warning
+  - `test_scripts.py`: incremental vendor command list without kernel steps, both GKI modes; qssi unchanged
+  - `test_retry.py`: a retry in an incremental run gets `ICB_INCREMENTAL=0` and runs the kernel steps
+  - `test_cli.py`: dry-run output, the flag together with `--only`/`--skip`
+
+### Verification
+Full suite on Python 3.13 and 3.8, plus manual checks:
+- `--stub --incremental`: the vendor log has no gki-fetch or prepare_vendor lines
+- `--stub --incremental --only qssi,vendor`: only those two run
+- `ICB_STUB_FAIL=vendor --stub --incremental`, then answer `y`: the attempt-2 vendor log shows the clean step and the kernel steps
+
+### Found while implementing: a dead output no longer kills the build
+A closed output pipe (e.g. `| head`, or a reader that exited) used to raise `BrokenPipeError` in the display. That crashed the orchestrator, and its cleanup force-killed the running builds.
+
+The scheduler now wraps its display in `GuardedDisplay` (`orchestrator/display/base.py`). When the display's output fails:
+- the display is switched off and stdout is pointed at `/dev/null`
+- a warning goes to `orchestrator.log`
+- the build continues, and the stage logs and the exit code are unaffected
+- a TUI whose terminal is gone no longer holds the run open
+- a retry prompt that can't be shown counts as "no"
+

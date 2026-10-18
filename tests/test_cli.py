@@ -42,6 +42,51 @@ class CliTests(WorkspaceTestCase):
         self.assertIn("ICB_STUB=1", out)
         self.assertEqual(os.listdir(os.path.join(self.tmp, "logs")), ["run"])  # no new run dir
 
+    def test_dry_run_incremental_with_selection(self):
+        code, out, err = self.call(*self.base_args(), "--incremental", "--skip", "tz,xbl",
+                                   "--dry-run")
+        self.assertEqual(code, 0, err)
+        self.assertIn("Build mode:  incremental", out)
+        self.assertIn("tz      SKIP (not selected)", out)
+        self.assertIn("vendor  RUN", out)
+        self.assertIn("ICB_INCREMENTAL=1", out)
+        self.assertIn('"incremental": true', out)
+
+    def test_incremental_run_only_builds_selected_stages(self):
+        code, out, err = self.call(*self.base_args(), "--ui", "plain", "--incremental",
+                                   "--only", "qssi,vendor")
+        self.assertEqual(code, 0, out + err)
+        self.assertIn("INCREMENTAL BUILD", out)
+        run_dir = os.path.realpath(os.path.join(self.tmp, "logs", "latest"))
+        logs = sorted(f for f in os.listdir(run_dir) if f.endswith(".log"))
+        self.assertEqual(logs, ["orchestrator.log", "qssi.log", "vendor.log"])
+
+    def test_incremental_warning_when_not_applicable(self):
+        code, _, err = self.call(*self.base_args(), "--incremental", "--only", "tz", "--dry-run")
+        self.assertEqual(code, 0)
+        self.assertIn("warning: --incremental only affects qssi and vendor", err)
+
+    def test_closed_output_pipe_does_not_kill_build(self):
+        import subprocess
+        import sys
+        from orchestrator.config import TOOL_ROOT
+        proc = subprocess.Popen(
+            [sys.executable, os.path.join(TOOL_ROOT, "icb_build.py")] + self.base_args()
+            + ["--ui", "plain"],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=self.tmp,
+            env=dict(os.environ, ICB_STUB_SLEEP="0.1"),
+        )
+        proc.stdout.readline()
+        proc.stdout.close()  # like `| head -1`
+        _, err = proc.communicate(timeout=60)
+        self.assertEqual(proc.returncode, 0, err)
+        self.assertNotIn(b"Traceback", err)
+        run_dir = os.path.realpath(os.path.join(self.tmp, "logs", "latest"))
+        with open(os.path.join(run_dir, "meta.log")) as fh:
+            self.assertIn("result   : COMPLETED", fh.read())
+        with open(os.path.join(run_dir, "orchestrator.log")) as fh:
+            self.assertIn("continuing without terminal output", fh.read())
+
     def test_jobs_over_limit_exits_2(self):
         code, _, err = self.call(*self.base_args(), "--vendor-jobs", "61")
         self.assertEqual(code, 2)

@@ -112,13 +112,18 @@ class FakeController:
         self.stages = {s.name: s for s in stages}
         self.interrupted = False
         self.retried = []
+        self.incremental = []
         self.cancels = 0
 
     def can_retry(self, name):
         return not self.interrupted and self.stages[name].state is StageState.FAILED
 
-    def retry(self, name):
+    def can_retry_incremental(self, name):
+        return name in ("qssi", "vendor") and self.can_retry(name)
+
+    def retry(self, name, incremental=False):
         self.retried.append(name)
+        self.incremental.append(incremental)
         self.stages[name].attempt += 1
         self.stages[name].state = StageState.PENDING
 
@@ -152,6 +157,40 @@ class TuiKeyTests(unittest.TestCase):
         tui.handle_key(ord("y"))
         self.assertEqual(ctrl.retried, ["qssi"])
         self.assertIn("queued for retry (attempt 2", tui.msg)
+
+    def test_incremental_rebuild_key(self):
+        states = list(self.DONE_WITH_FAILURE)
+        states[3] = StageState.FAILED  # vendor failed too
+        tui, ctrl, _ = self.make(states)
+        tui.selected = 3
+        tui.handle_key(ord("i"))
+        self.assertEqual(tui.confirm[0],
+                         "Incremental rebuild of vendor (keeps out/, skips kernel steps)? (y/n)")
+        tui.handle_key(ord("y"))
+        self.assertEqual((ctrl.retried, ctrl.incremental), (["vendor"], [True]))
+        self.assertIn("queued for incremental rebuild (attempt 2, out/ kept)", tui.msg)
+
+        tui.selected = 2
+        tui.handle_key(ord("i"))
+        self.assertEqual(tui.confirm[0], "Incremental rebuild of qssi (keeps out/)? (y/n)")
+        tui.handle_key(ord("n"))
+        self.assertEqual(ctrl.retried, ["vendor"])
+
+        tui.handle_key(ord("r"))  # r stays a clean retry
+        tui.handle_key(ord("y"))
+        self.assertEqual((ctrl.retried[-1], ctrl.incremental[-1]), ("qssi", False))
+
+    def test_incremental_key_refused_for_other_stages(self):
+        states = [StageState.FAILED] + list(self.DONE_WITH_FAILURE[1:])
+        tui, ctrl, _ = self.make(states)
+        tui.selected = 0  # tz FAILED
+        tui.handle_key(ord("i"))
+        self.assertIsNone(tui.confirm)
+        self.assertIn("only for qssi and vendor (use r to retry tz)", tui.msg)
+        tui.selected = 3  # vendor COMPLETED
+        tui.handle_key(ord("i"))
+        self.assertIn("vendor is COMPLETED: only FAILED stages can be rebuilt", tui.msg)
+        self.assertEqual(ctrl.retried, [])
 
     def test_retry_declined_or_not_allowed(self):
         tui, ctrl, _ = self.make(self.DONE_WITH_FAILURE)
@@ -194,13 +233,15 @@ class TuiKeyTests(unittest.TestCase):
         tui, ctrl, _ = self.make(self.DONE_WITH_FAILURE)
         vendor = NS(lunch_target="icb8155-user", gki=True,
                     gki_version="android14-6.1-2026-06_r6@16037590")
-        ctrl.cfg = NS(stub=False, stages={"qssi": NS(lunch_target="icbssi-user"), "vendor": vendor})
+        ctrl.cfg = NS(stub=False, incremental=False,
+                      stages={"qssi": NS(lunch_target="icbssi-user"), "vendor": vendor})
         self.assertEqual(
             tui.config_line(),
             " lunch: qssi icbssi-user, vendor icb8155-user   "
-            "GKI: user-provided android14-6.1-2026-06_r6@16037590")
+            "GKI: user-provided android14-6.1-2026-06_r6@16037590   build: full")
         vendor.gki = False
-        self.assertTrue(tui.config_line().endswith("GKI: not provided"))
+        ctrl.cfg.incremental = True
+        self.assertTrue(tui.config_line().endswith("GKI: not provided   build: incremental"))
 
     def test_viewer_and_help(self):
         tmp = tempfile.mkdtemp(prefix="icb_tui_")
@@ -323,6 +364,29 @@ class TuiPtyTests(unittest.TestCase):
         run_dir = os.path.realpath(os.path.join(self.logs, "latest"))
         self.assertTrue(os.path.exists(os.path.join(run_dir, "qssi.attempt1.log")))
         self.assertIn("COMPLETED (attempt 2)", self.text())
+
+    def test_incremental_rebuild_from_tui(self):
+        flaky = os.path.join(self.tmp, "flaky_vendor.sh")
+        write(flaky, '#!/usr/bin/env bash\n'
+                     'echo "clean=$ICB_CLEAN incremental=$ICB_INCREMENTAL"\n'
+                     '[ "$ICB_ATTEMPT" -ge 2 ] || exit 2\n')
+        cfg = os.path.join(self.tmp, "cfg.json")
+        write(cfg, json.dumps({"stages": {"vendor": {"script": flaky}}}))
+        self.spawn("-c", cfg)
+        self.wait_log("stage meta: BLOCKED")
+        self.keys(b"jjj")  # select vendor
+        self.keys(b"i")
+        self.keys(b"y")
+        self.wait_log("stage meta: COMPLETED")
+        self.keys(b"q")
+        self.assertEqual(self.finish(), 0)
+        run_dir = os.path.realpath(os.path.join(self.logs, "latest"))
+        with open(os.path.join(run_dir, "vendor.log")) as fh:
+            log = fh.read()
+        self.assertIn("attempt  : 2 (incremental rebuild)", log)
+        self.assertIn("build    : incremental", log)
+        self.assertIn("clean=0 incremental=1", log)
+        self.assertIn("retry requested, attempt 2 (incremental rebuild)", self.orchestrator_log())
 
     def test_quit_while_running_cancels(self):
         self.spawn(ICB_STUB_SLEEP="30")

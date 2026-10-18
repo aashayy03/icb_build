@@ -44,6 +44,7 @@ python3 icb_build.py -r /mnt/icb_ws            # build
 | `--gki-version STR` | e.g. `android14-6.1-2026-06_r6@16037590` (required when `--gki true`) |
 | `--only a,b` / `--skip a,b` | stage selection: `tz,xbl,qssi,vendor,super,meta` |
 | `--dry-run` | print resolved config and per-stage cwd/command/env, run nothing |
+| `--incremental` | incremental qssi/vendor build: keep `out/`, skip vendor's kernel steps (see below) |
 | `--stub` | run the pipeline, but scripts only log their commands (see Stub mode) |
 | `--log-dir PATH` | where run logs go (default `<tool-repo>/logs`) |
 | `--ui auto\|rich\|ansi\|plain\|tui` | status display (`tui` = interactive, see below) |
@@ -162,6 +163,28 @@ stage live with `tail -f logs/latest/qssi.log`.
 If the tool repo lives in a home directory with a small quota, clone it onto `/mnt` or
 `/data`, or pass `--log-dir`.
 
+## Incremental build (`--incremental`)
+
+Rebuilds QSSI and Vendor **without deleting `out/`**:
+
+| Stage | With `--incremental` |
+|---|---|
+| qssi | same commands as a normal build: envsetup, lunch, `build.sh --qssi_only` (out/ is kept) |
+| vendor | vendor-env.sh (if present), envsetup, lunch, `build.sh --target_only`. **Kernel steps skipped** (gki-fetch, `prepare_vendor.sh`), because the kernel has no incremental build |
+| tz, xbl, super, meta | unchanged |
+
+```bash
+python3 icb_build.py -r /mnt/icb_ws --incremental                        # full pipeline
+python3 icb_build.py -r /mnt/icb_ws --incremental --skip tz,xbl          # reuse TZ/XBL output
+python3 icb_build.py -r /mnt/icb_ws --incremental --only qssi,vendor     # just the two builds
+```
+
+- `--only`/`--skip` decide which stages run, as usual. `--incremental` only changes how qssi and vendor build.
+- There's no check that a previous build exists. If `out/` (or the kernel output) is missing, the build fails the normal way.
+- **A retry is still a full clean build**, including the kernel steps. In the TUI you can choose instead: `r` for a clean retry, or `i` for an incremental rebuild of a failed qssi/vendor stage.
+- The stage log header shows `build    : incremental` or `full`.
+- `--incremental` is a command-line flag only; it can't be set in the config file.
+
 ## Interactive TUI (`--ui tui`)
 
 ```bash
@@ -169,7 +192,7 @@ python3 icb_build.py -r /mnt/icb_ws --ui tui
 ```
 
 A full-screen terminal UI (curses, standard library only) with:
-- a header showing the run, its lunch targets and the GKI mode (user-provided plus its version, or not provided)
+- a header showing the run, its lunch targets, the GKI mode (user-provided plus its version, or not provided) and the build mode (`full` or `incremental`)
 - the stage table
 - a live tail of the selected stage's log
 - a full-screen log viewer
@@ -182,6 +205,7 @@ It's opt-in: `--ui auto` never picks it, and it needs a real terminal (exit 2 ot
 | Up/Down, k/j | select a stage (the log pane follows the selection) |
 | Enter | open the selected stage's log full screen |
 | r | clean and retry the selected FAILED stage (asks y/n) |
+| i | incremental rebuild of a FAILED qssi/vendor stage: keeps `out/`, vendor skips the kernel steps (asks y/n) |
 | c | cancel the run (asks y/n), same as Ctrl+C |
 | q | quit (asks to cancel first if stages are still running) |
 | ? | help |

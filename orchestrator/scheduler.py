@@ -12,9 +12,11 @@ from datetime import datetime
 from typing import Callable, Dict, List, Optional
 
 from .config import Config
-from .display.base import Display
+from .display.base import Display, GuardedDisplay
 from .runner import StageProcess, describe_exit, fmt_duration
-from .stages import DEPENDENCIES, STAGE_ORDER, StageState, StageStatus
+from .config import INCREMENTAL_STAGES
+from .stages import (DEPENDENCIES, REBUILD_CLEAN, REBUILD_INCREMENTAL, STAGE_ORDER,
+                     StageState, StageStatus)
 
 EXIT_OK = 0
 EXIT_FAILED = 1
@@ -46,11 +48,11 @@ class Scheduler:
         self.cfg = cfg
         self.run_id = run_id
         self.run_dir = run_dir
-        self.display = display
+        self.display = GuardedDisplay(display)
         self.poll_interval = poll_interval
         self.term_grace = term_grace
         self.retry_prompt = retry_prompt
-        display.attach(self)
+        self.display.attach(self)
         self.statuses = OrderedDict(
             (name, StageStatus(name)) for name in STAGE_ORDER
         )  # type: OrderedDict[str, StageStatus]
@@ -81,9 +83,14 @@ class Scheduler:
     def can_retry(self, name: str) -> bool:
         return not self.interrupted and self.statuses[name].state is StageState.FAILED
 
-    def retry(self, name: str) -> None:
-        """Queue a FAILED stage for a clean rebuild as its next attempt.
+    def can_retry_incremental(self, name: str) -> bool:
+        return name in INCREMENTAL_STAGES and self.can_retry(name)
 
+    def retry(self, name: str, incremental: bool = False) -> None:
+        """Queue a FAILED stage to run again as its next attempt.
+
+        By default it's a clean full build. incremental=True (qssi/vendor only)
+        keeps out/ and, for vendor, skips the kernel steps.
         The failed attempt's log is kept as <stage>.attempt<n>.log, and every stage
         that was blocked by the failure goes back to PENDING.
         """
@@ -91,6 +98,9 @@ class Scheduler:
             raise ValueError("stage %s cannot be retried (state %s%s)" % (
                 name, self.statuses[name].state.value,
                 ", run interrupted" if self.interrupted else ""))
+        if incremental and name not in INCREMENTAL_STAGES:
+            raise ValueError("incremental rebuild is only available for %s"
+                             % " and ".join(INCREMENTAL_STAGES))
         status = self.statuses[name]
         previous = status.attempt
         if status.log_path and os.path.exists(status.log_path):
@@ -98,6 +108,7 @@ class Scheduler:
             os.replace(status.log_path, kept)
         self._procs.pop(name, None)
         status.attempt = previous + 1
+        status.rebuild = REBUILD_INCREMENTAL if incremental else REBUILD_CLEAN
         status.state = StageState.PENDING
         status.started_at = status.ended_at = None
         status.start_wall = status.end_wall = None
@@ -105,8 +116,8 @@ class Scheduler:
         status.last_line = ""
         status.note = ""
         status.log_path = None
-        log.warning("stage %s: retry requested, attempt %d (clean before build)",
-                    name, status.attempt)
+        log.warning("stage %s: retry requested, attempt %d (%s)", name, status.attempt,
+                    "incremental rebuild" if incremental else "clean before build")
 
         # Unblock everything blocked by a failure, then let the normal propagation
         # re-block whatever still depends on another failed stage.
@@ -132,6 +143,11 @@ class Scheduler:
             display_active = True
             if self.cfg.stub:
                 msg = "STUB MODE: build commands are logged, not run (ICB_STUB=1)"
+                self.display.message(msg)
+                log.warning(msg)
+            if self.cfg.incremental:
+                msg = ("INCREMENTAL BUILD: qssi/vendor reuse out/, vendor kernel steps skipped "
+                       "(a retry is still a full clean build)")
                 self.display.message(msg)
                 log.warning(msg)
             while True:
@@ -191,7 +207,7 @@ class Scheduler:
         log.info("asking whether to retry: %s", ", ".join(s.name for s in failed))
         try:
             answer = self.retry_prompt(failed)
-        except KeyboardInterrupt:
+        except (KeyboardInterrupt, OSError):  # Ctrl+C, or the terminal went away
             answer = []
         chosen = [n for n in STAGE_ORDER if n in answer and self.can_retry(n)]
         log.info("retry chosen: %s", ", ".join(chosen) if chosen else "none")
@@ -314,7 +330,8 @@ class Scheduler:
             name=name,
             command=stage.command(),
             cwd=stage.dir,
-            passed_env=self.cfg.stage_env(name, self.run_id, self.run_dir, status.attempt),
+            passed_env=self.cfg.stage_env(name, self.run_id, self.run_dir, status.attempt,
+                                          status.rebuild),
             log_path=log_path,
             run_id=self.run_id,
             attempt=status.attempt,
