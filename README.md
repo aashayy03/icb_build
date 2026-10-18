@@ -109,6 +109,7 @@ aren't safe under it. Their exit status is still checked.
 | Variable | Stages |
 |---|---|
 | `ICB_ROOT_DIR`, `ICB_STAGE`, `ICB_STAGE_DIR`, `ICB_LOG_DIR`, `ICB_RUN_ID`, `ICB_STUB` | all |
+| `ICB_ATTEMPT`, `ICB_CLEAN` (`1`/`0`; a retry sets `2`+/`1`) | all |
 | `QSSI_LUNCH_TARGET`, `QSSI_JOBS` | qssi, super, meta |
 | `VENDOR_LUNCH_TARGET`, `VENDOR_JOBS`, `GKI_ENABLED`, `GKI_VERSION` | vendor, super, meta |
 | `QSSI_DIR`, `VENDOR_DIR` | super, meta |
@@ -122,7 +123,7 @@ Values hardcoded in the scripts can be overridden through `stages.<name>.env`:
 - meta: `META_FLAVORS`
 
 `scripts/common.sh` provides the helpers: `icb_run`, `icb_source`, `icb_source_if_present`,
-`icb_lunch`, `icb_log`, `icb_die`, `require_env` and `icb_done`.
+`icb_lunch`, `icb_clean_requested`, `icb_remove_dir`, `icb_log`, `icb_die`, `require_env` and `icb_done`.
 
 ### Stub mode
 
@@ -161,9 +162,37 @@ stage live with `tail -f logs/latest/qssi.log`.
 If the tool repo lives in a home directory with a small quota, clone it onto `/mnt` or
 `/data`, or pass `--log-dir`.
 
+## Retrying a failed stage
+
+When a run finishes with FAILED stages in a terminal, the tool asks about each one:
+
+```
+qssi FAILED (attempt 1, exit 2), log: logs/20261018-101500/qssi.log
+Clean and retry qssi? [y/N]
+```
+
+Answering `y` restarts that stage in a fresh shell. The env scripts, envsetup and lunch run
+again, after the stage's clean step (`ICB_CLEAN=1`):
+
+| Stage | Clean on retry |
+|---|---|
+| tz, xbl, super, meta | nothing: re-execute |
+| qssi | delete `apps_qssi/LINUX/android/out` |
+| vendor | delete `apps_vendor/LINUX/android/out` and `.../kernel_platform/out` |
+
+Stages it blocked, such as super and meta, then continue automatically. If it fails again,
+you're asked again. A QSSI/Vendor retry rebuilds from scratch, so expect a full build time.
+
+- Enter or `n` means no. EOF or Ctrl+C stops asking.
+- It never asks in CI or when output is piped, and never after Ctrl+C.
+- `<stage>.log` is the latest attempt; earlier attempts are kept as `<stage>.attempt<N>.log`.
+
+Deletes go through `icb_remove_dir` in `scripts/common.sh`, which refuses any path outside
+the stage's own directory. In `--stub` mode the deletes are only logged.
+
 ## Failures and Ctrl+C
 
-- If a stage fails, the other running stages finish. Stages that depend on it are `BLOCKED`.
+- If a stage fails, the other running stages finish. Stages that depend on it are `BLOCKED`, and the tool offers a retry at the end (see above).
 - **First Ctrl+C:** SIGTERM goes to every running stage's process group (make, ninja, … included). After 10 s, SIGKILL.
 - **Second Ctrl+C:** SIGKILL immediately.
 

@@ -70,6 +70,7 @@ def format_header(
     command: List[str],
     cwd: str,
     passed_env: Dict[str, str],
+    attempt: int = 1,
 ) -> str:
     lines = [
         RULE,
@@ -78,6 +79,7 @@ def format_header(
         "host     : %s  (user: %s)" % (socket.gethostname(), _user()),
         "command  : %s" % " ".join(command),
         "cwd      : %s" % cwd,
+        "attempt  : %d%s" % (attempt, " (clean before build)" if attempt > 1 else ""),
         "env      :",
     ]
     lines.extend("  %s=%s" % (k, passed_env[k]) for k in sorted(passed_env))
@@ -120,6 +122,7 @@ class StageProcess:
         passed_env: Dict[str, str],
         log_path: str,
         run_id: str,
+        attempt: int = 1,
     ) -> None:
         self.name = name
         self.command = command
@@ -127,6 +130,7 @@ class StageProcess:
         self.passed_env = passed_env
         self.log_path = log_path
         self.run_id = run_id
+        self.attempt = attempt
         self.last_line = ""
         self.signal_sent = None  # type: Optional[str]
         self.start_error = None  # type: Optional[str]
@@ -144,7 +148,8 @@ class StageProcess:
         """Write the log header and launch the script. Returns False if it could not start."""
         self._log = open(self.log_path, "ab")
         self._write(format_header(
-            self.name, self.run_id, start_wall, self.command, self.cwd, self.passed_env
+            self.name, self.run_id, start_wall, self.command, self.cwd, self.passed_env,
+            self.attempt,
         ).encode("utf-8"))
 
         env = os.environ.copy()

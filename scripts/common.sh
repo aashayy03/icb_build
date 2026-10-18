@@ -11,6 +11,9 @@
 # not run, and each one sleeps ICB_STUB_SLEEP seconds (default 1) instead. Use it
 # to check the whole pipeline without building. ICB_STUB_FAIL=<stage>[,<stage>]
 # makes those stages fail at the end, to test failure handling.
+#
+# Retries: when a failed stage is retried, the orchestrator sets ICB_ATTEMPT=<n>
+# and ICB_CLEAN=1; each script then runs its clean block before building.
 
 icb_log() {
     printf '[%s] [%s] %s\n' "$(date '+%H:%M:%S')" "${ICB_STAGE:-?}" "$*"
@@ -113,6 +116,26 @@ icb_lunch() {
     rc=$?
     set -eu
     (( rc == 0 )) || icb_die "lunch $1 failed (exit $rc)"
+}
+
+# icb_clean_requested  -- true on a retry (ICB_CLEAN=1, set by the orchestrator
+# for attempt > 1): the script must clean the stage's output before rebuilding.
+icb_clean_requested() {
+    [[ "${ICB_CLEAN:-0}" == 1 ]]
+}
+
+# icb_remove_dir DIR  -- delete a build output directory for a retry clean.
+# Refuses anything that is not strictly inside ICB_STAGE_DIR.
+icb_remove_dir() {
+    local dir="$1"
+    if [[ -z "$dir" || "$dir" != "${ICB_STAGE_DIR:?}"/* || "$dir" == *..* ]]; then
+        icb_die "refusing to delete '$dir': not inside ICB_STAGE_DIR ($ICB_STAGE_DIR)"
+    fi
+    if ! icb_stub && [[ ! -e "$dir" ]]; then
+        icb_log "$dir does not exist, nothing to delete"
+        return 0
+    fi
+    icb_run rm -rf -- "$dir"
 }
 
 # icb_done  -- call last in every stage script.

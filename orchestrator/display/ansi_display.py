@@ -38,6 +38,7 @@ class AnsiDisplay(Display):
 
     def stop(self, stages: List[StageStatus], interrupted: bool = False) -> None:
         self._draw(stages)
+        self._drawn = 0  # the final table stays on screen; never erase it later
         self.stream.write(SHOW_CURSOR)
         self.stream.flush()
         self.print_summary(stages, interrupted)

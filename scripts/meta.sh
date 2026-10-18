@@ -10,9 +10,13 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 META_FLAVORS="${META_FLAVORS:-8155}"
 
-require_env ICB_STAGE_DIR
+require_env ICB_STAGE_DIR ICB_ATTEMPT
 icb_log "starting meta in $PWD"
 icb_print_env META_FLAVORS
+
+if icb_clean_requested; then
+    icb_log "attempt ${ICB_ATTEMPT}: nothing to clean for meta, re-executing"
+fi
 
 icb_run python build.py --flavors="$META_FLAVORS"
 

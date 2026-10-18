@@ -41,6 +41,19 @@ def stage_detail(status: StageStatus) -> str:
     return status.note
 
 
+def result_label(status: StageStatus) -> str:
+    """State for the summary, with the attempt number once a stage was retried."""
+    if status.attempt > 1:
+        return "%s (attempt %d)" % (status.state.value, status.attempt)
+    return status.state.value
+
+
+def retry_message(stages: List[StageStatus]) -> str:
+    retried = ["%s (attempt %d)" % (s.name, s.attempt)
+               for s in stages if s.state is StageState.PENDING and s.attempt > 1]
+    return "Retrying: %s" % ", ".join(retried)
+
+
 def overall_result(stages: List[StageStatus], interrupted: bool) -> str:
     if interrupted or any(s.state is StageState.CANCELLED for s in stages):
         return "INTERRUPTED"
@@ -82,10 +95,15 @@ class Display:
     def stop(self, stages: List[StageStatus], interrupted: bool = False) -> None:
         self.print_summary(stages, interrupted)
 
+    def resume(self, stages: List[StageStatus]) -> None:
+        """Restart live output after stop(), when failed stages are being retried."""
+        self.message(retry_message(stages))
+        self.start(stages)
+
     def print_summary(self, stages: List[StageStatus], interrupted: bool = False) -> None:
         rows = [("STAGE", "RESULT", "DURATION", "DETAILS")]
         for s in stages:
-            rows.append((s.name, s.state.value, fmt_duration(s.elapsed()), stage_detail(s)))
+            rows.append((s.name, result_label(s), fmt_duration(s.elapsed()), stage_detail(s)))
         w0 = max(len(r[0]) for r in rows)
         w1 = max(len(r[1]) for r in rows)
         w2 = max(len(r[2]) for r in rows)

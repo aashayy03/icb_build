@@ -9,7 +9,7 @@ import threading
 import time
 from collections import OrderedDict
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
 from .config import Config
 from .display.base import Display
@@ -21,6 +21,11 @@ EXIT_FAILED = 1
 EXIT_INTERRUPTED = 130
 
 log = logging.getLogger("icb_build")
+
+BLOCKED_PREFIX = "blocked by "
+
+# Given the FAILED stages, returns the names the user chose to clean and retry.
+RetryPrompt = Callable[[List[StageStatus]], List[str]]
 
 
 def _now_wall() -> datetime:
@@ -36,6 +41,7 @@ class Scheduler:
         display: Display,
         poll_interval: float = 0.5,
         term_grace: float = 10.0,
+        retry_prompt: Optional[RetryPrompt] = None,
     ) -> None:
         self.cfg = cfg
         self.run_id = run_id
@@ -43,6 +49,7 @@ class Scheduler:
         self.display = display
         self.poll_interval = poll_interval
         self.term_grace = term_grace
+        self.retry_prompt = retry_prompt
         self.statuses = OrderedDict(
             (name, StageStatus(name)) for name in STAGE_ORDER
         )  # type: OrderedDict[str, StageStatus]
@@ -70,6 +77,47 @@ class Scheduler:
     def snapshot(self) -> List[StageStatus]:
         return list(self.statuses.values())
 
+    def can_retry(self, name: str) -> bool:
+        return not self.interrupted and self.statuses[name].state is StageState.FAILED
+
+    def retry(self, name: str) -> None:
+        """Queue a FAILED stage for a clean rebuild as its next attempt.
+
+        The failed attempt's log is kept as <stage>.attempt<n>.log, and every stage
+        that was blocked by the failure goes back to PENDING.
+        """
+        if not self.can_retry(name):
+            raise ValueError("stage %s cannot be retried (state %s%s)" % (
+                name, self.statuses[name].state.value,
+                ", run interrupted" if self.interrupted else ""))
+        status = self.statuses[name]
+        previous = status.attempt
+        if status.log_path and os.path.exists(status.log_path):
+            kept = os.path.join(self.run_dir, "%s.attempt%d.log" % (name, previous))
+            os.replace(status.log_path, kept)
+        self._procs.pop(name, None)
+        status.attempt = previous + 1
+        status.state = StageState.PENDING
+        status.started_at = status.ended_at = None
+        status.start_wall = status.end_wall = None
+        status.exit_code = None
+        status.last_line = ""
+        status.note = ""
+        status.log_path = None
+        log.warning("stage %s: retry requested, attempt %d (clean before build)",
+                    name, status.attempt)
+
+        # Unblock everything blocked by a failure, then let the normal propagation
+        # re-block whatever still depends on another failed stage.
+        for other, st in self.statuses.items():
+            if st.state is StageState.BLOCKED and st.note.startswith(BLOCKED_PREFIX):
+                st.state = StageState.PENDING
+                st.note = ""
+        self._propagate_blocked()
+        for other, st in self.statuses.items():
+            if other != name and st.state is StageState.PENDING:
+                log.info("stage %s: PENDING again (waiting for %s retry)", other, name)
+
     def run(self) -> int:
         log.info("run %s started; stages selected: %s", self.run_id, ", ".join(self.cfg.selected))
         for name, status in self.statuses.items():
@@ -77,26 +125,37 @@ class Scheduler:
                 log.info("stage %s: SKIPPED (not selected)", name)
 
         restore = self._install_signal_handlers()
+        display_active = False
         try:
             self.display.start(self.snapshot())
+            display_active = True
             if self.cfg.stub:
                 msg = "STUB MODE: build commands are logged, not run (ICB_STUB=1)"
                 self.display.message(msg)
                 log.warning(msg)
             while True:
-                self._handle_interrupts()
-                self._reap()
-                if not self.interrupted:
-                    self._propagate_blocked()
-                    self._start_ready()
-                self.display.update(self.snapshot())
-                if all(s.state.is_terminal for s in self.statuses.values()):
+                self._poll_until_done()
+                failed = [s for s in self.snapshot() if s.state is StageState.FAILED]
+                if self.interrupted or not failed or self.retry_prompt is None:
                     break
-                time.sleep(self.poll_interval)
+                self.display.stop(self.snapshot(), self.interrupted)
+                display_active = False
+                restore()  # default SIGINT while prompting: Ctrl+C means "no"
+                try:
+                    chosen = self._ask_retry(failed)
+                finally:
+                    restore = self._install_signal_handlers()
+                if not chosen:
+                    break
+                for name in chosen:
+                    self.retry(name)
+                self.display.resume(self.snapshot())
+                display_active = True
         finally:
             restore()
             self._kill_leftovers()
-            self.display.stop(self.snapshot(), self.interrupted)
+            if display_active:
+                self.display.stop(self.snapshot(), self.interrupted)
 
         code = self.exit_code()
         log.info("run %s finished with exit code %d", self.run_id, code)
@@ -111,6 +170,29 @@ class Scheduler:
         return EXIT_OK
 
     # -- internals --------------------------------------------------------
+
+    def _poll_until_done(self) -> None:
+        while True:
+            self._handle_interrupts()
+            self._reap()
+            if not self.interrupted:
+                self._propagate_blocked()
+                self._start_ready()
+            self.display.update(self.snapshot())
+            if all(s.state.is_terminal for s in self.statuses.values()):
+                return
+            time.sleep(self.poll_interval)
+
+    def _ask_retry(self, failed: List[StageStatus]) -> List[str]:
+        assert self.retry_prompt is not None
+        log.info("asking whether to retry: %s", ", ".join(s.name for s in failed))
+        try:
+            answer = self.retry_prompt(failed)
+        except KeyboardInterrupt:
+            answer = []
+        chosen = [n for n in STAGE_ORDER if n in answer and self.can_retry(n)]
+        log.info("retry chosen: %s", ", ".join(chosen) if chosen else "none")
+        return chosen
 
     def _install_signal_handlers(self):
         if threading.current_thread() is not threading.main_thread():
@@ -202,13 +284,15 @@ class Scheduler:
         # STAGE_ORDER is topological, so one pass also blocks transitive dependents.
         for name in STAGE_ORDER:
             status = self.statuses[name]
-            if status.state is not StageState.PENDING:
-                continue
             culprits = [d for d in DEPENDENCIES[name] if self.statuses[d].state.blocks_dependents]
-            if culprits:
+            if status.state is StageState.PENDING and culprits:
                 status.state = StageState.BLOCKED
-                status.note = "blocked by %s" % ", ".join(culprits)
+                status.note = BLOCKED_PREFIX + ", ".join(culprits)
                 log.info("stage %s: BLOCKED (%s)", name, status.note)
+            elif (status.state is StageState.BLOCKED and culprits
+                  and status.note.startswith(BLOCKED_PREFIX)):
+                # Keep the reason current, e.g. after a retried dependency fails again.
+                status.note = BLOCKED_PREFIX + ", ".join(culprits)
 
     def _start_ready(self) -> None:
         for name in STAGE_ORDER:
@@ -227,9 +311,10 @@ class Scheduler:
             name=name,
             command=stage.command(),
             cwd=stage.dir,
-            passed_env=self.cfg.stage_env(name, self.run_id, self.run_dir),
+            passed_env=self.cfg.stage_env(name, self.run_id, self.run_dir, status.attempt),
             log_path=log_path,
             run_id=self.run_id,
+            attempt=status.attempt,
         )
         status.log_path = log_path
         status.started_at = time.monotonic()
@@ -237,7 +322,8 @@ class Scheduler:
         self._procs[name] = proc
         if proc.start(status.start_wall):
             status.state = StageState.RUNNING
-            log.info("stage %s: RUNNING pid=%s cwd=%s", name, proc.pid, stage.dir)
+            log.info("stage %s: RUNNING attempt=%d pid=%s cwd=%s",
+                     name, status.attempt, proc.pid, stage.dir)
             return
         status.ended_at = time.monotonic()
         status.end_wall = _now_wall()

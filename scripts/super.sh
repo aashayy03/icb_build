@@ -10,12 +10,16 @@
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
-require_env ICB_STAGE_DIR QSSI_DIR VENDOR_LUNCH_TARGET SUPER_TARGET_LUNCH
+require_env ICB_STAGE_DIR ICB_ATTEMPT QSSI_DIR VENDOR_LUNCH_TARGET SUPER_TARGET_LUNCH
 icb_log "starting super in $PWD"
 icb_print_env QSSI_DIR VENDOR_LUNCH_TARGET SUPER_TARGET_LUNCH SUPER_OUTPUT_OTA SUPER_NO_TMP
 
 icb_source build/envsetup.sh
 icb_lunch "$VENDOR_LUNCH_TARGET"
+
+if icb_clean_requested; then
+    icb_log "attempt ${ICB_ATTEMPT}: nothing to clean for super, re-executing"
+fi
 
 args=(
     --image super

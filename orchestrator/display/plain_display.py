@@ -6,7 +6,7 @@ import time
 from typing import List, Optional, Tuple
 
 from ..stages import StageStatus
-from .base import Display
+from .base import Display, retry_message
 
 
 class PlainDisplay(Display):
@@ -27,6 +27,11 @@ class PlainDisplay(Display):
             self._print(
                 "[%s] %s" % (self.run_elapsed(), " ".join("%s=%s" % (s.name, s.state.value) for s in stages))
             )
+
+    def resume(self, stages: List[StageStatus]) -> None:
+        self.message(retry_message(stages))
+        self._last_sig = None
+        self.update(stages)
 
     def message(self, text: str) -> None:
         self._print("[%s] %s" % (self.run_elapsed(), text))

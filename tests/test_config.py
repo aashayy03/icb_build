@@ -241,8 +241,12 @@ class ConfigTests(WorkspaceTestCase):
         tz = cfg.stage_env("tz", "RID", "/logs/RID")
         self.assertEqual(
             sorted(tz),
-            ["ICB_LOG_DIR", "ICB_ROOT_DIR", "ICB_RUN_ID", "ICB_STAGE", "ICB_STAGE_DIR", "ICB_STUB"],
+            ["ICB_ATTEMPT", "ICB_CLEAN", "ICB_LOG_DIR", "ICB_ROOT_DIR", "ICB_RUN_ID",
+             "ICB_STAGE", "ICB_STAGE_DIR", "ICB_STUB"],
         )
+        self.assertEqual((tz["ICB_ATTEMPT"], tz["ICB_CLEAN"]), ("1", "0"))
+        retry = cfg.stage_env("tz", "RID", "/logs/RID", attempt=3)
+        self.assertEqual((retry["ICB_ATTEMPT"], retry["ICB_CLEAN"]), ("3", "1"))
 
 
 if __name__ == "__main__":

@@ -12,7 +12,7 @@ from rich.text import Text
 
 from ..runner import fmt_duration
 from ..stages import StageState, StageStatus
-from .base import STATE_STYLE, Display, overall_result, stage_detail
+from .base import STATE_STYLE, Display, overall_result, result_label, stage_detail
 
 
 class RichDisplay(Display):
@@ -85,7 +85,7 @@ class RichDisplay(Display):
         for s in stages:
             table.add_row(
                 s.name,
-                Text(s.state.value, style=STATE_STYLE[s.state]),
+                Text(result_label(s), style=STATE_STYLE[s.state]),
                 fmt_duration(s.elapsed()),
                 Text(stage_detail(s)),
             )

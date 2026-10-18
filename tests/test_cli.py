@@ -4,7 +4,8 @@ import json
 import os
 import unittest
 
-from orchestrator.cli import main
+from orchestrator.cli import main, make_retry_prompt
+from orchestrator.stages import StageState, StageStatus
 from tests.helpers import WorkspaceTestCase
 
 
@@ -86,6 +87,33 @@ class CliTests(WorkspaceTestCase):
         self.assertEqual(code, 0)
         self.assertNotEqual(os.path.realpath(latest), run_dir)
         self.assertTrue(os.path.isdir(run_dir))
+
+
+class RetryPromptTests(unittest.TestCase):
+    def failed(self, *names):
+        return [StageStatus(n, state=StageState.FAILED, exit_code=2,
+                            log_path="/logs/%s.log" % n) for n in names]
+
+    def ask(self, answers, *names):
+        out = io.StringIO()
+        chosen = make_retry_prompt(io.StringIO(answers), out)(self.failed(*names))
+        return chosen, out.getvalue()
+
+    def test_yes_and_no(self):
+        chosen, out = self.ask("y\n\n", "tz", "qssi")
+        self.assertEqual(chosen, ["tz"])
+        self.assertIn("qssi FAILED (attempt 1, exit 2), log: /logs/qssi.log", out)
+        self.assertIn("Clean and retry qssi? [y/N] ", out)
+
+    def test_yes_variants(self):
+        self.assertEqual(self.ask("YES\n", "vendor")[0], ["vendor"])
+        self.assertEqual(self.ask(" Y \n", "vendor")[0], ["vendor"])
+        self.assertEqual(self.ask("no\n", "vendor")[0], [])
+        self.assertEqual(self.ask("sure\n", "vendor")[0], [])
+
+    def test_eof_skips_remaining(self):
+        self.assertEqual(self.ask("y\n", "tz", "xbl", "qssi")[0], ["tz"])
+        self.assertEqual(self.ask("", "tz")[0], [])
 
 
 if __name__ == "__main__":

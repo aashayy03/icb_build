@@ -57,6 +57,7 @@ class StageStatus:
     last_line: str = ""
     log_path: Optional[str] = None
     note: str = ""
+    attempt: int = 1  # incremented by Scheduler.retry()
 
     def elapsed(self, now: Optional[float] = None) -> Optional[float]:
         if self.started_at is None:

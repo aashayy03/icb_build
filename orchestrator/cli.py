@@ -8,13 +8,14 @@ import logging
 import os
 import sys
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, TextIO
 
 from . import __version__
 from .config import MAX_JOBS, Config, ConfigError, parse_bool, resolve
 from .display import resolve_mode, select_display
-from .scheduler import Scheduler
-from .stages import DEPENDENCIES, STAGE_ORDER
+from .runner import describe_exit
+from .scheduler import RetryPrompt, Scheduler
+from .stages import DEPENDENCIES, STAGE_ORDER, StageStatus
 
 EXIT_USAGE = 2
 
@@ -151,6 +152,33 @@ def print_dry_run(cfg: Config, out=None) -> None:
             w("            %s=%s\n" % (key, env[key]))
 
 
+def make_retry_prompt(stdin: TextIO, stdout: TextIO) -> RetryPrompt:
+    """Ask [y/N] for each failed stage. Ctrl+C skips the remaining questions."""
+
+    def prompt(failed: List[StageStatus]) -> List[str]:
+        chosen = []  # type: List[str]
+        for status in failed:
+            stdout.write("\n%s FAILED (attempt %d, exit %s), log: %s\n" % (
+                status.name, status.attempt, describe_exit(status.exit_code),
+                status.log_path or "-"))
+            stdout.write("Clean and retry %s? [y/N] " % status.name)
+            stdout.flush()
+            try:
+                answer = stdin.readline()
+            except KeyboardInterrupt:
+                stdout.write("\n")
+                break
+            if not answer:  # EOF
+                stdout.write("\n")
+                break
+            if answer.strip().lower() in ("y", "yes"):
+                chosen.append(status.name)
+        stdout.flush()
+        return chosen
+
+    return prompt
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     args = build_parser().parse_args(argv)
 
@@ -210,7 +238,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         logging.getLogger("icb_build").info(
             "resolved config: %s", json.dumps(cfg.to_dict(), sort_keys=True)
         )
-        return Scheduler(cfg, run_id, run_dir, display).run()
+        retry_prompt = None
+        if sys.stdin.isatty() and sys.stdout.isatty():
+            retry_prompt = make_retry_prompt(sys.stdin, sys.stdout)
+        return Scheduler(cfg, run_id, run_dir, display, retry_prompt=retry_prompt).run()
     finally:
         logging.getLogger("icb_build").removeHandler(handler)
         handler.close()

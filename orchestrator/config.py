@@ -238,7 +238,9 @@ class Config:
     warnings: List[str] = field(default_factory=list)
     stub: bool = False  # --stub: scripts log commands instead of running them
 
-    def stage_env(self, name: str, run_id: str, run_dir: str) -> Dict[str, str]:
+    def stage_env(
+        self, name: str, run_id: str, run_dir: str, attempt: int = 1
+    ) -> Dict[str, str]:
         """Variables passed to a stage's script (and printed in its log header)."""
         stage = self.stages[name]
         qssi, vendor = self.stages["qssi"], self.stages["vendor"]
@@ -250,6 +252,9 @@ class Config:
             "ICB_RUN_ID": run_id,
             # Always passed, so an ICB_STUB exported in the user's shell can't leak in.
             "ICB_STUB": "1" if self.stub else "0",
+            # A retry (attempt > 1) asks the script to clean the stage's output first.
+            "ICB_ATTEMPT": str(attempt),
+            "ICB_CLEAN": "1" if attempt > 1 else "0",
         }
         qssi_vars = {
             "QSSI_LUNCH_TARGET": qssi.lunch_target,

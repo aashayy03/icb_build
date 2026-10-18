@@ -1,6 +1,6 @@
 # ICB Build Orchestrator: Design Plan
 
-> Status: **implemented (v0.1.0)**, real build commands in place, `--stub` for dry pipeline runs. See README.md for usage.
+> Status: **implemented (v0.1.0)**, real build commands in place, `--stub` for dry pipeline runs, retry of failed stages (section 13). TUI planned in `docs/TUI_PLAN.md`. See README.md for usage.
 
 ---
 
@@ -212,6 +212,7 @@ stdout and stderr are merged into that stage's log file. **All settings are pass
 | `ICB_LOG_DIR` | all | `/.../logs/20261009-201500` |
 | `ICB_RUN_ID` | all | `20261009-201500` |
 | `ICB_STUB` | all | `0`, or `1` with `--stub` |
+| `ICB_ATTEMPT`, `ICB_CLEAN` | all | `1`, `0`; on a retry `2`, `1` (see section 13) |
 | `QSSI_LUNCH_TARGET`, `QSSI_JOBS` | qssi, super, meta | `icbssi-userdebug`, `60` |
 | `VENDOR_LUNCH_TARGET`, `VENDOR_JOBS` | vendor, super, meta | `icb8155-userdebug`, `60` |
 | `GKI_ENABLED` | vendor (+ super, meta) | `true` / `false` |
@@ -361,6 +362,7 @@ logs/
 ├── 20261008-174210/              ← an earlier run, kept as is
 └── latest -> 20261009-201500     ← symlink to the most recent run
 ```
+A retried stage keeps earlier attempts as `<stage>.attempt<N>.log` next to `<stage>.log` (section 13).
 
 ### 9.2 Stage logs (`<stage>.log`)
 - The script's stdout and stderr both go into one file, so errors appear in order with the rest of the output.
@@ -463,5 +465,54 @@ Optional: `PyYAML` for YAML configs and `rich` for the nicer display. Both suppo
 | GKI false | Skip gki-fetch; prepare_vendor.sh without `ALAP_GKI_FRAGMENT=0` |
 | Super | envsetup + lunch vendor target first; `target_lunch`/`output_ota`/`no_tmp` configurable |
 | Testing without building | `--stub` mode |
+| Retry | Asked at the end of a terminal run. Clean: QSSI `out/`; Vendor `out/` and `kernel_platform/out/`; TZ, XBL, Super and Meta re-execute only. Logs kept per attempt (section 13) |
 
 No open questions remain.
+
+---
+
+## 13. Retry of failed stages
+
+When stages fail, the tool can clean and rebuild them without restarting the whole run.
+
+**When it asks.** After every stage has finished, the tool asks about each FAILED stage, in pipeline order. It only asks if the run wasn't interrupted (Ctrl+C) and both stdin and stdout are terminals:
+```
+qssi FAILED (attempt 1, exit 2), log: logs/20261018-101500/qssi.log
+Clean and retry qssi? [y/N]
+```
+- `y`/`yes` means retry.
+- Enter or anything else means no.
+- EOF or Ctrl+C stops asking. Stages already answered `y` are still retried.
+- With no terminal (CI, `| tee`, nohup, cron) it never asks; the run ends as before.
+
+**What a retry does:**
+- All chosen stages restart together as attempt n+1, each in a **new shell**. Env scripts, `envsetup.sh` and `lunch` are re-sourced.
+- The orchestrator passes `ICB_ATTEMPT=<n>` and `ICB_CLEAN=1`, and each script runs its **clean step** (table below) before rebuilding.
+- Stages that were BLOCKED by the failure go back to PENDING and run automatically once the retried stage passes. They stay blocked if they also depend on another stage that is still failed.
+- If a stage fails again, the tool asks again. There is no fixed retry limit.
+- The exit code reflects the final states.
+
+**Logs.** `<stage>.log` is always the latest attempt. Earlier attempts are kept as `<stage>.attempt1.log`, `<stage>.attempt2.log`, and so on. Each attempt has its own header and footer, and the header includes `attempt  : 2 (clean before build)`. `orchestrator.log` records each question, the answers and each retry. The summary shows e.g. `COMPLETED (attempt 2)`.
+
+**Code:**
+- `Scheduler.can_retry(name)` and `Scheduler.retry(name)` are public, so the planned TUI (`docs/TUI_PLAN.md`) can call them from its `r` key.
+- The prompt is `cli.make_retry_prompt`.
+- `Display.resume()` restarts the live display after the prompt.
+
+**Clean step per stage (on a retry):**
+
+| Stage | Clean before re-executing |
+|---|---|
+| tz, xbl | nothing: re-execute |
+| qssi | `rm -rf apps_qssi/LINUX/android/out` |
+| vendor | `rm -rf apps_vendor/LINUX/android/out` and `apps_vendor/LINUX/android/kernel_platform/out` |
+| super, meta | nothing: re-execute (super leaves Vendor's output alone) |
+
+- For qssi and vendor, the delete runs **before** the env scripts, `envsetup.sh` and `lunch`, because lunch writes soong state into `out/`.
+- Deletes go through `icb_remove_dir` (`scripts/common.sh`). It refuses any path that isn't strictly inside the stage's own directory (`ICB_STAGE_DIR`), as well as empty paths and paths containing `..`.
+- In `--stub` mode the `rm -rf` is logged, not run.
+- If an `out/` directory doesn't exist, nothing is deleted: the step logs `... does not exist, nothing to delete` and the build continues.
+- Assumptions, confirmed for the ICB build server:
+  - `out` is never a symlink, so `rm -rf` removes the real output.
+  - The env scripts set `OUT_DIR`, but it's always `out`, so there's no separate `OUT_DIR` to clean.
+- A full delete of `out/` means the retried QSSI/Vendor build starts from scratch, so expect a full build time.
