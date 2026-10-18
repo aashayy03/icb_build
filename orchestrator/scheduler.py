@@ -50,6 +50,7 @@ class Scheduler:
         self.poll_interval = poll_interval
         self.term_grace = term_grace
         self.retry_prompt = retry_prompt
+        display.attach(self)
         self.statuses = OrderedDict(
             (name, StageStatus(name)) for name in STAGE_ORDER
         )  # type: OrderedDict[str, StageStatus]
@@ -136,7 +137,8 @@ class Scheduler:
             while True:
                 self._poll_until_done()
                 failed = [s for s in self.snapshot() if s.state is StageState.FAILED]
-                if self.interrupted or not failed or self.retry_prompt is None:
+                if (self.interrupted or not failed or self.retry_prompt is None
+                        or self.display.handles_retry):
                     break
                 self.display.stop(self.snapshot(), self.interrupted)
                 display_active = False
@@ -179,9 +181,10 @@ class Scheduler:
                 self._propagate_blocked()
                 self._start_ready()
             self.display.update(self.snapshot())
-            if all(s.state.is_terminal for s in self.statuses.values()):
+            if (all(s.state.is_terminal for s in self.statuses.values())
+                    and not self.display.holds_open()):
                 return
-            time.sleep(self.poll_interval)
+            self.display.wait(self.poll_interval)
 
     def _ask_retry(self, failed: List[StageStatus]) -> List[str]:
         assert self.retry_prompt is not None

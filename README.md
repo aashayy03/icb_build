@@ -46,7 +46,7 @@ python3 icb_build.py -r /mnt/icb_ws            # build
 | `--dry-run` | print resolved config and per-stage cwd/command/env, run nothing |
 | `--stub` | run the pipeline, but scripts only log their commands (see Stub mode) |
 | `--log-dir PATH` | where run logs go (default `<tool-repo>/logs`) |
-| `--ui auto\|rich\|ansi\|plain` | status display |
+| `--ui auto\|rich\|ansi\|plain\|tui` | status display (`tui` = interactive, see below) |
 
 Precedence: built-in defaults < config file < command line.
 
@@ -162,9 +162,46 @@ stage live with `tail -f logs/latest/qssi.log`.
 If the tool repo lives in a home directory with a small quota, clone it onto `/mnt` or
 `/data`, or pass `--log-dir`.
 
+## Interactive TUI (`--ui tui`)
+
+```bash
+python3 icb_build.py -r /mnt/icb_ws --ui tui
+```
+
+A full-screen terminal UI (curses, standard library only) with:
+- a header showing the run, its lunch targets and the GKI mode (user-provided plus its version, or not provided)
+- the stage table
+- a live tail of the selected stage's log
+- a full-screen log viewer
+- keyboard control, including retrying failed stages
+
+It's opt-in: `--ui auto` never picks it, and it needs a real terminal (exit 2 otherwise).
+
+| Key | Main screen |
+|---|---|
+| Up/Down, k/j | select a stage (the log pane follows the selection) |
+| Enter | open the selected stage's log full screen |
+| r | clean and retry the selected FAILED stage (asks y/n) |
+| c | cancel the run (asks y/n), same as Ctrl+C |
+| q | quit (asks to cancel first if stages are still running) |
+| ? | help |
+
+| Key | Log viewer |
+|---|---|
+| Up/Down, PgUp/PgDn, g/G | scroll, top, bottom |
+| f | follow the end of the log on/off (on while the stage runs) |
+| / , n , N | search (case-insensitive), next, previous match |
+| q / Esc | back |
+
+- **Stays open:** the TUI stays open after the run ends (success, failure or Ctrl+C) so you can read logs and retry. Press `q` to leave; the normal summary is then printed.
+- **Retry:** retries work while other stages are still running. In TUI mode the end-of-run `[y/N]` prompt isn't used; `r` replaces it.
+- **Exit codes:** the same as for the other displays.
+- **Terminal size:** it needs at least 60x15.
+
 ## Retrying a failed stage
 
-When a run finishes with FAILED stages in a terminal, the tool asks about each one:
+When a run finishes with FAILED stages in a terminal, the tool asks about each one. In the TUI,
+select the stage and press `r` instead.
 
 ```
 qssi FAILED (attempt 1, exit 2), log: logs/20261018-101500/qssi.log

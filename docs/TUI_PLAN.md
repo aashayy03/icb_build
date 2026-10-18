@@ -1,6 +1,14 @@
 # ICB Build TUI: Saved Plan
 
-> Status: **planned, not implemented.** Saved for later. Retry of failed stages is already implemented (`docs/PLAN.md` section 13); this plan builds on it.
+> Status: **implemented.** Usage is in README.md ("Interactive TUI"). Code:
+> - `orchestrator/display/tui_display.py`: curses screen and keys
+> - `orchestrator/display/logview.py`: log tail, line index and viewer state, with no curses drawing
+> - tests: `tests/test_tui.py`
+>
+> Notes from implementation:
+> - The pieces are sized for a 60x15 minimum.
+> - A drawing error is logged to `orchestrator.log` and never stops the build.
+> - The header's second line shows the run settings: `lunch: qssi <target>, vendor <target>   GKI: user-provided <version>` (or `GKI: not provided`).
 
 ## Goal
 An interactive terminal UI for a build run, opt-in with `--ui tui`. It lets you:
@@ -107,6 +115,6 @@ Additions to `orchestrator/display/base.py`. The defaults keep the existing disp
   - with `ICB_STUB_FAIL=qssi`, send `r`, `y`, then `q`: `qssi.attempt1.log` exists and the attempt count shows 2
 - Run on Python 3.13 and 3.8.20.
 
-## Open questions for when this is picked up
-- Should the TUI also show the vendor GKI mode and lunch targets in the header?
-- Should there be a "retry all failed" key (e.g. `R`)?
+## Decided after implementation
+- **Show the vendor GKI mode and lunch targets in the header?** Yes. The second header line shows the QSSI and Vendor lunch targets and the GKI mode (user-provided plus its version, or not provided).
+- **Add a "retry all failed" key?** No. Retries are one stage at a time with `r`.

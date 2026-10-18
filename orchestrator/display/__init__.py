@@ -1,4 +1,7 @@
-"""Status display selection: rich if installed, else built-in ANSI, plain when not a TTY."""
+"""Status display selection: rich if installed, else built-in ANSI, plain when not a TTY.
+
+The interactive TUI is never picked automatically; it needs --ui tui.
+"""
 
 from __future__ import annotations
 
@@ -53,4 +56,12 @@ def select_display(
         from .plain_display import PlainDisplay
 
         return PlainDisplay(*args)
+    if mode == "tui":
+        if not (hasattr(stream, "isatty") and stream.isatty() and sys.stdin.isatty()):
+            raise ConfigError("--ui tui needs an interactive terminal (stdin and stdout)")
+        try:
+            from .tui_display import TuiDisplay
+        except ImportError as exc:
+            raise ConfigError("--ui tui is unavailable: %s" % exc)
+        return TuiDisplay(*args)
     raise ConfigError("unknown ui mode %r" % mode)

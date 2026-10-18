@@ -1,6 +1,6 @@
 # ICB Build Orchestrator: Design Plan
 
-> Status: **implemented (v0.1.0)**, real build commands in place, `--stub` for dry pipeline runs, retry of failed stages (section 13). TUI planned in `docs/TUI_PLAN.md`. See README.md for usage.
+> Status: **implemented (v0.1.0)**, real build commands in place, `--stub` for dry pipeline runs, retry of failed stages (section 13). interactive TUI `--ui tui` (`docs/TUI_PLAN.md`). See README.md for usage.
 
 ---
 
@@ -74,7 +74,9 @@ icb_build/
 │   └── display/
 │       ├── rich_display.py      # pretty live table (used if `rich` is installed)
 │       ├── ansi_display.py      # stdlib-only live table (fallback)
-│       └── plain_display.py     # periodic one-line status (CI / piped output)
+│       ├── plain_display.py     # periodic one-line status (CI / piped output)
+│       ├── tui_display.py       # interactive curses TUI (--ui tui)
+│       └── logview.py           # log tail / line index / viewer state for the TUI
 ├── scripts/
 │   ├── common.sh                # helpers: icb_run/icb_source/icb_lunch (logging + stub mode)
 │   └── tz.sh  xbl.sh  qssi.sh  vendor.sh  super.sh  meta.sh     # real build commands
@@ -172,7 +174,7 @@ python3 icb_build.py -r ROOT_DIR [options]
 | `--dry-run` | Show the resolved config and exact command/cwd/env for each stage, run nothing | none |
 | `--stub` | Run the whole pipeline, but scripts only log their commands (`ICB_STUB=1`) | none |
 | `--log-dir PATH` | Where run logs go | `log_dir` |
-| `--ui MODE` | `auto` / `rich` / `ansi` / `plain` | `ui` |
+| `--ui MODE` | `auto` / `rich` / `ansi` / `plain` / `tui` (interactive, see `docs/TUI_PLAN.md`) | `ui` |
 
 New flags can be added easily: each one is a single line mapping a flag to a config key.
 

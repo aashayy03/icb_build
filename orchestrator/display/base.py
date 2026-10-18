@@ -67,6 +67,10 @@ def overall_result(stages: List[StageStatus], interrupted: bool) -> str:
 class Display:
     """Receives stage snapshots from the scheduler (always on the main thread)."""
 
+    # True for an interactive display that offers retries itself (the TUI):
+    # the scheduler then skips its end-of-run [y/N] prompt.
+    handles_retry = False
+
     def __init__(
         self,
         run_id: str,
@@ -79,6 +83,19 @@ class Display:
         self.status_interval = status_interval
         self.stream = stream if stream is not None else sys.stdout
         self.t0 = time.monotonic()
+        self.controller = None  # the Scheduler, set by attach()
+
+    def attach(self, controller) -> None:
+        """Called by the scheduler so interactive displays can cancel or retry."""
+        self.controller = controller
+
+    def wait(self, seconds: float) -> None:
+        """Pause between scheduler polls. Interactive displays read keys here."""
+        time.sleep(seconds)
+
+    def holds_open(self) -> bool:
+        """True keeps the run open after every stage finished (until the user quits)."""
+        return False
 
     def run_elapsed(self) -> str:
         return fmt_duration(time.monotonic() - self.t0)

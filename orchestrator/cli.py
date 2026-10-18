@@ -64,7 +64,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="run the pipeline with every build command logged but not run "
                         "(ICB_STUB=1), to check orchestration without building")
     p.add_argument("--log-dir", metavar="PATH", help="directory for run logs")
-    p.add_argument("--ui", choices=("auto", "rich", "ansi", "plain"), help="status display mode")
+    p.add_argument("--ui", choices=("auto", "rich", "ansi", "plain", "tui"),
+                   help="status display mode (tui: interactive, see README)")
     p.add_argument("--version", action="version", version="%(prog)s " + __version__)
     return p
 
