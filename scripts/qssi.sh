@@ -3,7 +3,7 @@
 # cwd: snapdragon-auto-gen3-la/apps_qssi/LINUX/android
 #
 # QSSI_LUNCH_TARGET: icbssi-userdebug (default) or icbssi-user  (--qssi-lunch)
-# QSSI_JOBS: -j for build.sh, max 60                             (--qssi-jobs)
+# QSSI_JOBS: -j for build.sh, max 90                             (--qssi-jobs)
 # Retry (ICB_CLEAN=1): deletes out/ first, then rebuilds from scratch.
 # Incremental (ICB_INCREMENTAL=1, --incremental): same commands, out/ is kept.
 

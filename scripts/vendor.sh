@@ -3,7 +3,7 @@
 # cwd: snapdragon-auto-gen3-la/apps_vendor/LINUX/android
 #
 # VENDOR_LUNCH_TARGET: icb8155-userdebug (default) or icb8155-user  (--vendor-lunch)
-# VENDOR_JOBS: -j for build.sh, max 60                               (--vendor-jobs)
+# VENDOR_JOBS: -j for build.sh, max 90                               (--vendor-jobs)
 # GKI_ENABLED=true:  fetch the user-provided GKI GKI_VERSION, and prepare the
 #                    vendor kernel with ALAP_GKI_FRAGMENT=0          (--gki true --gki-version ...)
 # GKI_ENABLED=false: no fetch, and prepare without ALAP_GKI_FRAGMENT (--gki false)

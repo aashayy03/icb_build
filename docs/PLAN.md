@@ -119,11 +119,11 @@ stages:                    # every path is relative to --root-dir
   qssi:
     path: snapdragon-auto-gen3-la/apps_qssi/LINUX/android
     lunch_target: icbssi-userdebug     # or icbssi-user
-    jobs: 60               # hard max 60 (shared build server)
+    jobs: 60               # hard max 90 (shared build server)
   vendor:
     path: snapdragon-auto-gen3-la/apps_vendor/LINUX/android
     lunch_target: icb8155-userdebug    # or icb8155-user
-    jobs: 60               # hard max 60 (shared build server)
+    jobs: 60               # hard max 90 (shared build server)
     gki: false
     gki_version: ""        # e.g. android14-6.1-2026-06_r6@16037590
   super:
@@ -146,7 +146,7 @@ All values above are also the **built-in defaults**, so the config file only nee
 - The platform must be Linux. Otherwise exit with a clear message.
 - `--root-dir` is turned into an **absolute path with symlinks resolved** (`os.path.realpath`) before use, so every path the scripts and logs see is absolute. On the build server workspaces live under `/mnt/...` or `/data/...`, but any location is accepted, including a local test tree.
 - `--root-dir` must exist and contain `snapdragon-auto-gen3-la/`. Otherwise it's an error: you probably passed the wrong directory, e.g. `snapdragon-auto-gen3-la` itself instead of its parent.
-- **`jobs` (QSSI and Vendor) must be an integer from 1 to 60.** 60 is a hard limit because the 192-core build server is shared. A value above 60 from the config or CLI is an **error (exit 2)**, not quietly lowered, so you always know the real `-j` used. The default is `min(60, nproc)`. The limit is one constant (`MAX_JOBS = 60` in `config.py`) if it ever needs to change.
+- **`jobs` (QSSI and Vendor) must be an integer from 1 to 90.** 90 is a hard limit because the 192-core build server is shared. A value above 90 from the config or CLI is an **error (exit 2)**, not quietly lowered, so you always know the real `-j` used. The default is `min(90, nproc)`. The limit is one constant (`MAX_JOBS = 90` in `config.py`) if it ever needs to change.
 - `gki: true` requires a non-empty `gki_version`.
 - Stage names in `--only` / `--skip` must be valid.
 - The working dir of every stage that will run must exist. In `--dry-run` this is only a warning.
@@ -164,9 +164,9 @@ python3 icb_build.py -r ROOT_DIR [options]
 | `-r, --root-dir PATH` | **Required.** Root of the repo-synced workspace | none |
 | `-c, --config PATH` | YAML/JSON config file | none |
 | `--qssi-lunch TARGET` | QSSI lunch target (default `icbssi-userdebug`) | `stages.qssi.lunch_target` |
-| `--qssi-jobs N` | QSSI `-j` (1–60) | `stages.qssi.jobs` |
+| `--qssi-jobs N` | QSSI `-j` (1–90) | `stages.qssi.jobs` |
 | `--vendor-lunch TARGET` | Vendor lunch target (default `icb8155-userdebug`) | `stages.vendor.lunch_target` |
-| `--vendor-jobs N` | Vendor `-j` (1–60) | `stages.vendor.jobs` |
+| `--vendor-jobs N` | Vendor `-j` (1–90) | `stages.vendor.jobs` |
 | `--gki true\|false` | Whether you provide the GKI (also accepts yes/no/1/0) | `stages.vendor.gki` |
 | `--gki-version STR` | e.g. `android14-6.1-2026-06_r6@16037590` | `stages.vendor.gki_version` |
 | `--only a,b` | Run only these stages | none |
@@ -215,8 +215,8 @@ stdout and stderr are merged into that stage's log file. **All settings are pass
 | `ICB_RUN_ID` | all | `20261009-201500` |
 | `ICB_STUB` | all | `0`, or `1` with `--stub` |
 | `ICB_ATTEMPT`, `ICB_CLEAN` | all | `1`, `0`; on a retry `2`, `1` (see section 13) |
-| `QSSI_LUNCH_TARGET`, `QSSI_JOBS` | qssi, super, meta | `icbssi-userdebug`, `60` |
-| `VENDOR_LUNCH_TARGET`, `VENDOR_JOBS` | vendor, super, meta | `icb8155-userdebug`, `60` |
+| `QSSI_LUNCH_TARGET`, `QSSI_JOBS` | qssi, super, meta | `icbssi-userdebug`, `90` |
+| `VENDOR_LUNCH_TARGET`, `VENDOR_JOBS` | vendor, super, meta | `icb8155-userdebug`, `90` |
 | `GKI_ENABLED` | vendor (+ super, meta) | `true` / `false` |
 | `GKI_VERSION` | vendor (+ super, meta) | `android14-6.1-2026-06_r6@16037590` |
 | `QSSI_DIR`, `VENDOR_DIR` | super, meta | absolute paths, since these steps need both trees |
@@ -458,7 +458,7 @@ Optional: `PyYAML` for YAML configs and `rich` for the nicer display. Both suppo
 |---|---|
 | Source layout | `--root-dir` is the **parent** of `snapdragon-auto-gen3-la/`. Stage paths (built-in defaults): TZ `snapdragon-auto-gen3-la/tz_8155/trustzone_images/build/ms`, XBL `.../boot_8155/boot_images/QcomPkg`, QSSI `.../apps_qssi/LINUX/android`, Vendor + Super `.../apps_vendor/LINUX/android`, Meta `.../common/build` |
 | Super dependencies | Super waits for **all four** (TZ, XBL, QSSI, Vendor) to pass. TZ/XBL are quick, so the delay is small |
-| Jobs limit | QSSI and Vendor `jobs` are each **at most 60** (shared 192-core server). Values over 60 are rejected (exit 2). Default `min(60, nproc)` |
+| Jobs limit | QSSI and Vendor `jobs` are each **at most 90** (shared 192-core server). Values over 90 are rejected (exit 2). Default `min(90, nproc)` |
 | `--root-dir` | **CLI only.** `root_dir` in a config file is an error |
 | Workspace location | On the build server, workspaces live under `/mnt` or `/data`. This is informational only: any `--root-dir` is accepted and resolved to an absolute path. The examples use `/mnt/icb_ws` and `/data/icb_ws` |
 | Log location | Logs stay in the tool's repo (`<tool-repo>/logs/`) by default. Can be overridden with `--log-dir` or `log_dir` |

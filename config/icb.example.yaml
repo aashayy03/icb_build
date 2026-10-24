@@ -15,11 +15,11 @@ stages:                    # every path is relative to --root-dir
   qssi:
     path: snapdragon-auto-gen3-la/apps_qssi/LINUX/android
     lunch_target: icbssi-userdebug        # or icbssi-user
-    jobs: 60                              # 1..60 (shared build server limit)
+    jobs: 60                              # 1..90 (shared build server limit)
   vendor:
     path: snapdragon-auto-gen3-la/apps_vendor/LINUX/android
     lunch_target: icb8155-userdebug       # or icb8155-user
-    jobs: 60                              # 1..60 (shared build server limit)
+    jobs: 60                              # 1..90 (shared build server limit)
     gki: false                            # true = GKI provided by the user
     gki_version: ""                       # e.g. android14-6.1-2026-06_r6@16037590
   super:

@@ -38,8 +38,8 @@ python3 icb_build.py -r /mnt/icb_ws            # build
 |---|---|
 | `-r, --root-dir PATH` | **required**, workspace root (CLI only, not allowed in the config) |
 | `-c, --config PATH` | YAML/JSON config (default: `./icb_build.yaml`, `.yml` or `.json` if present) |
-| `--qssi-lunch TARGET` / `--qssi-jobs N` | QSSI lunch target (default `icbssi-userdebug`) / `-j` (1..60) |
-| `--vendor-lunch TARGET` / `--vendor-jobs N` | Vendor lunch target (default `icb8155-userdebug`) / `-j` (1..60) |
+| `--qssi-lunch TARGET` / `--qssi-jobs N` | QSSI lunch target (default `icbssi-userdebug`) / `-j` (1..90) |
+| `--vendor-lunch TARGET` / `--vendor-jobs N` | Vendor lunch target (default `icb8155-userdebug`) / `-j` (1..90) |
 | `--gki true\|false` | whether the GKI is provided by the user |
 | `--gki-version STR` | e.g. `android14-6.1-2026-06_r6@16037590` (required when `--gki true`) |
 | `--only a,b` / `--skip a,b` | stage selection: `tz,xbl,qssi,vendor,super,meta` |
@@ -71,7 +71,7 @@ See [`config/icb.example.yaml`](config/icb.example.yaml) (JSON equivalent:
 defaults hold the standard stage paths and lunch targets. Unknown keys are rejected so typos don't go unnoticed.
 
 Rules checked before anything runs:
-- `jobs` for qssi/vendor must be 1..60 (shared build server). Higher values are an error, never silently lowered.
+- `jobs` for qssi/vendor must be 1..90 (shared build server). Higher values are an error, never silently lowered.
 - `gki: true` needs a `gki_version`.
 - The qssi lunch target is required when qssi runs, and the vendor lunch target when vendor or super runs.
 - The working directory and script of every selected stage must exist (only a warning with `--dry-run`).

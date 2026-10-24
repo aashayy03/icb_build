@@ -88,9 +88,9 @@ class CliTests(WorkspaceTestCase):
             self.assertIn("continuing without terminal output", fh.read())
 
     def test_jobs_over_limit_exits_2(self):
-        code, _, err = self.call(*self.base_args(), "--vendor-jobs", "61")
+        code, _, err = self.call(*self.base_args(), "--vendor-jobs", "91")
         self.assertEqual(code, 2)
-        self.assertIn("--vendor-jobs / stages.vendor.jobs = 61 is out of range", err)
+        self.assertIn("--vendor-jobs / stages.vendor.jobs = 91 is out of range", err)
 
     def test_root_dir_is_required(self):
         code, _, err = self.call("--dry-run")

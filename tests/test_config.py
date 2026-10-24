@@ -158,20 +158,20 @@ class ConfigTests(WorkspaceTestCase):
 
     def test_jobs_above_limit_from_cli_rejected(self):
         self.assertConfigError(
-            "--qssi-jobs / stages.qssi.jobs = 61 is out of range",
-            overrides={"stages": {"qssi": {"jobs": 61}}},
+            "--qssi-jobs / stages.qssi.jobs = 91 is out of range",
+            overrides={"stages": {"qssi": {"jobs": 91}}},
         )
 
     def test_jobs_above_limit_from_file_rejected(self):
-        path = self.write_json({"stages": {"vendor": {"jobs": 64}}})
+        path = self.write_json({"stages": {"vendor": {"jobs": 94}}})
         self.assertConfigError(
-            "stages.vendor.jobs = 64 is out of range: must be 1..60",
+            "stages.vendor.jobs = 94 is out of range: must be 1..90",
             config_path=path, overrides={"stages": {"vendor": {"jobs": None}}},
         )
 
     def test_jobs_limit_is_inclusive(self):
-        cfg = self.resolve(overrides={"stages": {"qssi": {"jobs": 60}, "vendor": {"jobs": 1}}})
-        self.assertEqual((cfg.stages["qssi"].jobs, cfg.stages["vendor"].jobs), (60, 1))
+        cfg = self.resolve(overrides={"stages": {"qssi": {"jobs": 90}, "vendor": {"jobs": 1}}})
+        self.assertEqual((cfg.stages["qssi"].jobs, cfg.stages["vendor"].jobs), (90, 1))
 
     def test_jobs_must_be_positive_integer(self):
         for bad in (0, -4, "12", True, 2.5):
