@@ -51,9 +51,10 @@ def result_label(status: StageStatus) -> str:
 
 
 def retry_message(stages: List[StageStatus]) -> str:
+    """'Retrying: ...' for stages queued for another attempt, or "" if there are none."""
     retried = ["%s (attempt %d)" % (s.name, s.attempt)
                for s in stages if s.state is StageState.PENDING and s.attempt > 1]
-    return "Retrying: %s" % ", ".join(retried)
+    return "Retrying: %s" % ", ".join(retried) if retried else ""
 
 
 def overall_result(stages: List[StageStatus], interrupted: bool) -> str:
@@ -70,7 +71,7 @@ class Display:
     """Receives stage snapshots from the scheduler (always on the main thread)."""
 
     # True for an interactive display that offers retries itself (the TUI):
-    # the scheduler then skips its end-of-run [y/N] prompt.
+    # the scheduler then never asks its [y/N] retry question.
     handles_retry = False
 
     def __init__(
@@ -114,9 +115,17 @@ class Display:
     def stop(self, stages: List[StageStatus], interrupted: bool = False) -> None:
         self.print_summary(stages, interrupted)
 
+    def pause(self, stages: List[StageStatus]) -> None:
+        """Stop live output, leaving the current state on screen, for the retry question.
+
+        Followed by resume(), or by stop() if the run ended meanwhile.
+        """
+
     def resume(self, stages: List[StageStatus]) -> None:
-        """Restart live output after stop(), when failed stages are being retried."""
-        self.message(retry_message(stages))
+        """Restart live output after pause()."""
+        msg = retry_message(stages)
+        if msg:
+            self.message(msg)
         self.start(stages)
 
     def print_summary(self, stages: List[StageStatus], interrupted: bool = False) -> None:
@@ -187,6 +196,9 @@ class GuardedDisplay:
 
     def stop(self, stages: List[StageStatus], interrupted: bool = False) -> None:
         self._call("stop", stages, interrupted)
+
+    def pause(self, stages: List[StageStatus]) -> None:
+        self._call("pause", stages)
 
     def resume(self, stages: List[StageStatus]) -> None:
         self._call("resume", stages)

@@ -29,7 +29,9 @@ class PlainDisplay(Display):
             )
 
     def resume(self, stages: List[StageStatus]) -> None:
-        self.message(retry_message(stages))
+        msg = retry_message(stages)
+        if msg:
+            self.message(msg)
         self._last_sig = None
         self.update(stages)
 

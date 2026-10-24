@@ -24,6 +24,7 @@ ELAPSED_W = 9
 class AnsiDisplay(Display):
     def start(self, stages: List[StageStatus]) -> None:
         self._drawn = 0
+        self._paused = False
         self._color = "NO_COLOR" not in os.environ
         self.stream.write(HIDE_CURSOR)
         self._draw(stages)
@@ -36,8 +37,16 @@ class AnsiDisplay(Display):
         self._print(text)
         self._drawn = 0
 
-    def stop(self, stages: List[StageStatus], interrupted: bool = False) -> None:
+    def pause(self, stages: List[StageStatus]) -> None:
         self._draw(stages)
+        self._drawn = 0  # keep the table on screen above the question
+        self._paused = True
+        self.stream.write(SHOW_CURSOR)
+        self.stream.flush()
+
+    def stop(self, stages: List[StageStatus], interrupted: bool = False) -> None:
+        if not self._paused:  # a paused table is already on screen
+            self._draw(stages)
         self._drawn = 0  # the final table stays on screen; never erase it later
         self.stream.write(SHOW_CURSOR)
         self.stream.flush()

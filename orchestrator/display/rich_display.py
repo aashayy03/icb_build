@@ -35,9 +35,14 @@ class RichDisplay(Display):
     def message(self, text: str) -> None:
         self.console.print(text, markup=False, highlight=False)
 
+    def pause(self, stages: List[StageStatus]) -> None:
+        self._stages = stages
+        self._live.stop()  # transient: clears the live table...
+        self.console.print(self._render())  # ...so leave a static copy above the question
+
     def stop(self, stages: List[StageStatus], interrupted: bool = False) -> None:
         self._stages = stages
-        self._live.stop()
+        self._live.stop()  # no-op if already paused
         self.print_summary(stages, interrupted)
 
     def _state_cell(self, s: StageStatus):

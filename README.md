@@ -218,21 +218,23 @@ It's opt-in: `--ui auto` never picks it, and it needs a real terminal (exit 2 ot
 | q / Esc | back |
 
 - **Stays open:** the TUI stays open after the run ends (success, failure or Ctrl+C) so you can read logs and retry. Press `q` to leave; the normal summary is then printed.
-- **Retry:** retries work while other stages are still running. In TUI mode the end-of-run `[y/N]` prompt isn't used; `r` replaces it.
+- **Retry:** retries work while other stages are still running. In TUI mode the `[y/N]` retry question isn't used; `r` replaces it.
 - **Exit codes:** the same as for the other displays.
 - **Terminal size:** it needs at least 60x15.
 
 ## Retrying a failed stage
 
-When a run finishes with FAILED stages in a terminal, the tool asks about each one. In the TUI,
-select the stage and press `r` instead.
+When a stage fails in a terminal, the tool asks right away whether to retry it, even while
+other stages are still building. The live table pauses for the question (the builds keep
+running) and resumes after your answer. In the TUI, select the stage and press `r` instead.
 
 ```
-qssi FAILED (attempt 1, exit 2), log: logs/20261018-101500/qssi.log
-Clean and retry qssi? [y/N]
+vendor FAILED (attempt 1, exit 2), log: logs/20261018-101500/vendor.log
+still running: qssi
+Clean and retry vendor? [y/N]
 ```
 
-Answering `y` restarts that stage in a fresh shell. The env scripts, envsetup and lunch run
+Answering `y` restarts that stage right away in a fresh shell, while the other stages keep building. The env scripts, envsetup and lunch run
 again, after the stage's clean step (`ICB_CLEAN=1`):
 
 | Stage | Clean on retry |
@@ -244,7 +246,10 @@ again, after the stage's clean step (`ICB_CLEAN=1`):
 Stages it blocked, such as super and meta, then continue automatically. If it fails again,
 you're asked again. A QSSI/Vendor retry rebuilds from scratch, so expect a full build time.
 
-- Enter or `n` means no. EOF or Ctrl+C stops asking.
+- Enter or `n` means no, and it's final: that failure isn't asked about again at the end of the run.
+- Ctrl+C while other stages are still running cancels the run, like Ctrl+C at any other time.
+  With nothing else running, Ctrl+C (or EOF) just stops asking.
+- Keys typed before the question appears (a stray Enter or `y`) are discarded, so they can't answer it.
 - It never asks in CI or when output is piped, and never after Ctrl+C.
 - `<stage>.log` is the latest attempt; earlier attempts are kept as `<stage>.attempt<N>.log`.
 
@@ -253,7 +258,7 @@ the stage's own directory. In `--stub` mode the deletes are only logged.
 
 ## Failures and Ctrl+C
 
-- If a stage fails, the other running stages finish. Stages that depend on it are `BLOCKED`, and the tool offers a retry at the end (see above).
+- If a stage fails, the other running stages finish. Stages that depend on it are `BLOCKED`, and the tool offers a retry right away (see above).
 - **First Ctrl+C:** SIGTERM goes to every running stage's process group (make, ninja, … included). After 10 s, SIGKILL.
 - **Second Ctrl+C:** SIGKILL immediately.
 

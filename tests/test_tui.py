@@ -237,8 +237,10 @@ class TuiKeyTests(unittest.TestCase):
         self.assertFalse(tui.show_help)
 
 
-class TuiPtyTests(unittest.TestCase):
-    """Run icb_build.py --ui tui in a pseudo-terminal and drive it with keys."""
+class PtyTestCase(unittest.TestCase):
+    """Run icb_build.py --stub --ui <ui> in a pseudo-terminal and drive it with keys."""
+
+    ui = "tui"
 
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="icb_tui_pty_")
@@ -265,7 +267,7 @@ class TuiPtyTests(unittest.TestCase):
             os.chdir(self.tmp)
             os.execve(sys.executable, [sys.executable, os.path.join(TOOL_ROOT, "icb_build.py"),
                                    "-r", self.root, "--stub", "--log-dir", self.logs,
-                                   "--ui", "tui"] + list(extra), env)
+                                   "--ui", self.ui] + list(extra), env)
         self.pid, self.fd = pid, fd
 
     def pump(self, seconds):
@@ -314,6 +316,8 @@ class TuiPtyTests(unittest.TestCase):
     def text(self):
         return self.out.decode("utf-8", "replace")
 
+
+class TuiPtyTests(PtyTestCase):
     def test_success_then_quit(self):
         self.spawn()
         self.wait_log("stage meta: COMPLETED")

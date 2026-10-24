@@ -6,9 +6,11 @@ import argparse
 import json
 import logging
 import os
+import select
 import sys
+import termios
 import time
-from typing import Any, Dict, List, Optional, TextIO
+from typing import Any, Callable, Dict, List, Optional, TextIO
 
 from . import __version__
 from .config import MAX_JOBS, Config, ConfigError, parse_bool, resolve
@@ -18,6 +20,9 @@ from .scheduler import RetryPrompt, Scheduler
 from .stages import DEPENDENCIES, STAGE_ORDER, StageStatus
 
 EXIT_USAGE = 2
+
+# How often the retry question lets the scheduler reap stages while it waits.
+PROMPT_IDLE_INTERVAL = 0.5
 
 
 def _bool_arg(value: str) -> bool:
@@ -159,22 +164,48 @@ def print_dry_run(cfg: Config, out=None) -> None:
 
 
 def make_retry_prompt(stdin: TextIO, stdout: TextIO) -> RetryPrompt:
-    """Ask [y/N] for each failed stage. Ctrl+C skips the remaining questions."""
+    """Ask [y/N] for each failed stage. EOF or Ctrl+C skips the remaining questions."""
 
-    def prompt(failed: List[StageStatus]) -> List[str]:
+    def fileno() -> Optional[int]:
+        try:
+            return stdin.fileno()
+        except (AttributeError, OSError, ValueError):  # e.g. io.StringIO in tests
+            return None
+
+    def drop_typeahead(fd: Optional[int]) -> None:
+        # Keys pressed during the build (a stray Enter or "y") must not answer the question.
+        if fd is not None and os.isatty(fd):
+            try:
+                termios.tcflush(fd, termios.TCIFLUSH)
+            except termios.error:
+                pass
+
+    def read_answer(fd: Optional[int], idle: Callable[[], bool]) -> Optional[str]:
+        """One line of input, "" on EOF, None when idle() says to stop asking."""
+        if fd is not None:
+            while not select.select([fd], [], [], PROMPT_IDLE_INTERVAL)[0]:
+                if idle():
+                    return None
+        return stdin.readline()
+
+    def prompt(failed: List[StageStatus], running: List[str],
+               idle: Callable[[], bool]) -> List[str]:
+        fd = fileno()
+        drop_typeahead(fd)
         chosen = []  # type: List[str]
         for status in failed:
             stdout.write("\n%s FAILED (attempt %d, exit %s), log: %s\n" % (
                 status.name, status.attempt, describe_exit(status.exit_code),
                 status.log_path or "-"))
+            if running:
+                stdout.write("still running: %s\n" % ", ".join(running))
             stdout.write("Clean and retry %s? [y/N] " % status.name)
             stdout.flush()
             try:
-                answer = stdin.readline()
+                answer = read_answer(fd, idle)
             except KeyboardInterrupt:
-                stdout.write("\n")
-                break
-            if not answer:  # EOF
+                answer = None
+            if not answer:  # Ctrl+C or EOF
                 stdout.write("\n")
                 break
             if answer.strip().lower() in ("y", "yes"):

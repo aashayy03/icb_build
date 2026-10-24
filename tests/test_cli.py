@@ -3,6 +3,7 @@ import io
 import json
 import os
 import unittest
+from unittest import mock
 
 from orchestrator.cli import main, make_retry_prompt
 from orchestrator.stages import StageState, StageStatus
@@ -139,9 +140,10 @@ class RetryPromptTests(unittest.TestCase):
         return [StageStatus(n, state=StageState.FAILED, exit_code=2,
                             log_path="/logs/%s.log" % n) for n in names]
 
-    def ask(self, answers, *names):
+    def ask(self, answers, *names, running=()):
         out = io.StringIO()
-        chosen = make_retry_prompt(io.StringIO(answers), out)(self.failed(*names))
+        chosen = make_retry_prompt(io.StringIO(answers), out)(
+            self.failed(*names), running, lambda: False)
         return chosen, out.getvalue()
 
     def test_yes_and_no(self):
@@ -159,6 +161,36 @@ class RetryPromptTests(unittest.TestCase):
     def test_eof_skips_remaining(self):
         self.assertEqual(self.ask("y\n", "tz", "xbl", "qssi")[0], ["tz"])
         self.assertEqual(self.ask("", "tz")[0], [])
+
+    def test_shows_stages_still_running(self):
+        _, out = self.ask("\n", "vendor", running=["qssi"])
+        self.assertIn("still running: qssi\nClean and retry vendor? [y/N] ", out)
+        _, out = self.ask("\n", "meta")
+        self.assertNotIn("still running", out)
+
+    def test_idle_called_while_waiting_and_can_stop_asking(self):
+        r, w = os.pipe()
+        self.addCleanup(os.close, w)
+        calls = []
+
+        def idle():
+            calls.append(1)
+            return len(calls) >= 2  # e.g. Ctrl+C on the second step
+
+        with os.fdopen(r) as stdin:
+            with mock.patch("orchestrator.cli.PROMPT_IDLE_INTERVAL", 0.01):
+                chosen = make_retry_prompt(stdin, io.StringIO())(
+                    self.failed("tz", "xbl"), [], idle)
+        self.assertEqual((chosen, len(calls)), ([], 2))
+
+    def test_answer_from_a_real_file_descriptor(self):
+        r, w = os.pipe()
+        os.write(w, b"y\n")
+        os.close(w)
+        with os.fdopen(r) as stdin:
+            chosen = make_retry_prompt(stdin, io.StringIO())(
+                self.failed("vendor"), ["qssi"], lambda: False)
+        self.assertEqual(chosen, ["vendor"])
 
 
 if __name__ == "__main__":

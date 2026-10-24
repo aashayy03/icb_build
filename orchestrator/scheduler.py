@@ -9,7 +9,7 @@ import threading
 import time
 from collections import OrderedDict
 from datetime import datetime
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Set, Tuple
 
 from .config import Config
 from .display.base import Display, GuardedDisplay
@@ -24,8 +24,10 @@ log = logging.getLogger("icb_build")
 
 BLOCKED_PREFIX = "blocked by "
 
-# Given the FAILED stages, returns the names the user chose to clean and retry.
-RetryPrompt = Callable[[List[StageStatus]], List[str]]
+# Asked as soon as stages fail: prompt(failed, running, idle) returns the names the
+# user chose to clean and retry. `running` names the stages still building. While it
+# waits for input the prompt calls idle(), which returns True when it must stop asking.
+RetryPrompt = Callable[[List[StageStatus], List[str], Callable[[], bool]], List[str]]
 
 
 def _now_wall() -> datetime:
@@ -63,6 +65,7 @@ class Scheduler:
         self._interrupt_lock = threading.Lock()
         self._cancel_started_at = None  # type: Optional[float]
         self._force_killed = False
+        self._offered = set()  # type: Set[Tuple[str, int]]  # (stage, attempt) asked about
 
     # -- public -----------------------------------------------------------
 
@@ -140,25 +143,7 @@ class Scheduler:
                        "(a retry is still a full clean build)")
                 self.display.message(msg)
                 log.warning(msg)
-            while True:
-                self._poll_until_done()
-                failed = [s for s in self.snapshot() if s.state is StageState.FAILED]
-                if (self.interrupted or not failed or self.retry_prompt is None
-                        or self.display.handles_retry):
-                    break
-                self.display.stop(self.snapshot(), self.interrupted)
-                display_active = False
-                restore()  # default SIGINT while prompting: Ctrl+C means "no"
-                try:
-                    chosen = self._ask_retry(failed)
-                finally:
-                    restore = self._install_signal_handlers()
-                if not chosen:
-                    break
-                for name in chosen:
-                    self.retry(name)
-                self.display.resume(self.snapshot())
-                display_active = True
+            self._poll_until_done()
         finally:
             restore()
             self._kill_leftovers()
@@ -185,6 +170,9 @@ class Scheduler:
             self._reap()
             if not self.interrupted:
                 self._propagate_blocked()
+                self._offer_retry()
+                self._handle_interrupts()  # Ctrl+C during the question cancels the run
+            if not self.interrupted:
                 self._start_ready()
             self.display.update(self.snapshot())
             if (all(s.state.is_terminal for s in self.statuses.values())
@@ -192,16 +180,59 @@ class Scheduler:
                 return
             self.display.wait(self.poll_interval)
 
+    def _offer_retry(self) -> None:
+        """Ask about each newly FAILED stage right away, while other stages keep building.
+
+        Every (stage, attempt) is asked about once: a "no" is final for that attempt.
+        """
+        if self.retry_prompt is None or self.display.handles_retry:
+            return
+        failed = [s for s in self.statuses.values() if s.state is StageState.FAILED
+                  and (s.name, s.attempt) not in self._offered]
+        if not failed:
+            return
+        self._offered.update((s.name, s.attempt) for s in failed)
+        self.display.pause(self.snapshot())
+        chosen = self._ask_retry(failed)
+        for name in chosen:
+            self.retry(name)
+        if chosen or not all(s.state.is_terminal for s in self.statuses.values()):
+            self.display.resume(self.snapshot())
+        # Otherwise the run is over: stop() prints the summary under the paused table.
+
     def _ask_retry(self, failed: List[StageStatus]) -> List[str]:
         assert self.retry_prompt is not None
-        log.info("asking whether to retry: %s", ", ".join(s.name for s in failed))
+        running = self._running()
+        log.info("asking whether to retry: %s (still running: %s)",
+                 ", ".join(s.name for s in failed), ", ".join(running) or "nothing")
         try:
-            answer = self.retry_prompt(failed)
+            answer = self.retry_prompt(failed, running, self._retry_idle)
         except (KeyboardInterrupt, OSError):  # Ctrl+C, or the terminal went away
             answer = []
+        with self._interrupt_lock:
+            cancelled = self._interrupts > 0
+        if cancelled:
+            log.info("retry question ended by Ctrl+C: cancelling the run")
+            return []
         chosen = [n for n in STAGE_ORDER if n in answer and self.can_retry(n)]
         log.info("retry chosen: %s", ", ".join(chosen) if chosen else "none")
         return chosen
+
+    def _retry_idle(self) -> bool:
+        """Called while the retry question waits for input. True means stop asking.
+
+        Reaping here keeps the end time and duration of a stage that finishes during
+        the question correct. Ctrl+C cancels the run while stages are still running;
+        with nothing left running it only stops asking, as it always has.
+        """
+        self._reap()
+        with self._interrupt_lock:
+            if not self._interrupts:
+                return False
+            if not self._running():
+                self._interrupts = 0
+                log.info("retry question ended by Ctrl+C")
+        return True
 
     def _install_signal_handlers(self):
         if threading.current_thread() is not threading.main_thread():

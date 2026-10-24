@@ -80,7 +80,7 @@ Full-screen log viewer:
 ## Behaviour
 - The TUI **stays open after the run ends** until `q`, so you can browse logs and retry failures.
 - `r` works while other stages are still running: the retried stage starts right away.
-- In TUI mode the end-of-run `[y/N]` prompt is not used; the `r` key replaces it.
+- In TUI mode the `[y/N]` retry question (asked as soon as a stage fails, PLAN.md section 15) is not used; the `r` key replaces it.
 - After `q`, curses is shut down and the normal text summary is printed to the terminal.
 
 ## Design

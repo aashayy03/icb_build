@@ -477,14 +477,14 @@ No open questions remain.
 
 When stages fail, the tool can clean and rebuild them without restarting the whole run.
 
-**When it asks.** After every stage has finished, the tool asks about each FAILED stage, in pipeline order. It only asks if the run wasn't interrupted (Ctrl+C) and both stdin and stdout are terminals:
+**When it asks.** As soon as a stage fails, while other stages keep running (section 15; originally it asked only after every stage had finished). Several stages failing together are asked about in pipeline order. It only asks if the run wasn't interrupted (Ctrl+C) and both stdin and stdout are terminals:
 ```
 qssi FAILED (attempt 1, exit 2), log: logs/20261018-101500/qssi.log
 Clean and retry qssi? [y/N]
 ```
 - `y`/`yes` means retry.
 - Enter or anything else means no.
-- EOF or Ctrl+C stops asking. Stages already answered `y` are still retried.
+- EOF, or Ctrl+C with nothing else running, stops asking. Stages already answered `y` are still retried. Ctrl+C while other stages are running cancels the run (section 15).
 - With no terminal (CI, `| tee`, nohup, cron) it never asks; the run ends as before.
 
 **What a retry does:**
@@ -499,7 +499,7 @@ Clean and retry qssi? [y/N]
 **Code:**
 - `Scheduler.can_retry(name)` and `Scheduler.retry(name)` are public, so the planned TUI (`docs/TUI_PLAN.md`) can call them from its `r` key.
 - The prompt is `cli.make_retry_prompt`.
-- `Display.resume()` restarts the live display after the prompt.
+- `Display.pause()` / `Display.resume()` stop and restart the live display around the question.
 
 **Clean step per stage (on a retry):**
 
@@ -589,3 +589,79 @@ The scheduler now wraps its display in `GuardedDisplay` (`orchestrator/display/b
 - a TUI whose terminal is gone no longer holds the run open
 - a retry prompt that can't be shown counts as "no"
 
+
+---
+
+## 15. Ask about a retry as soon as a stage fails
+
+> Status: **implemented.** It replaces the "When it asks" timing in section 13 for the rich, ansi and plain displays. The TUI is unchanged: it already has `r`.
+
+### Problem
+With `--ui rich` (or ansi/plain in a terminal), if Vendor fails while QSSI is still building, the `[y/N]` question only appears after QSSI finishes, which can be an hour later. The reason: `Scheduler.run()` asks only after `_poll_until_done()` returns, and that waits for every stage to finish.
+
+### New behaviour (agreed)
+- **Ask right away.** The question appears on the first poll after a stage becomes FAILED, even if other stages are still running:
+  ```
+  vendor FAILED (attempt 1, exit 2), log: logs/20261024-101500/vendor.log
+  still running: qssi
+  Clean and retry vendor? [y/N]
+  ```
+- **Pause the table while asking.** The live table stops and its current state is printed once, statically, so the question can be read and answered. **Builds keep running in the background**, because their output is read by `runner.py`'s reader threads, not the main loop. After the answer, the live table restarts.
+- **`y`:** the stage restarts right away as attempt n+1 (clean step as in section 13), while the other stages keep building. What it blocked (super, meta) goes back to PENDING, as today.
+- **`n` / Enter / EOF:** final for that failure. **It is not asked again at the end of the run.** The stage stays FAILED and its dependents stay BLOCKED. A later failure of the *same* stage (a new attempt) is asked about again, as today.
+- **Ctrl+C while the question is open and other stages are running cancels the run.** It behaves like Ctrl+C at any other time: no retry, SIGTERM to every running stage, SIGKILL after 10 s, exit 130.
+- **Ctrl+C with nothing else running** (e.g. meta failed) keeps the old behaviour: it stops asking and the run ends with exit 1 (decided after review).
+- **No end-of-run question any more.** Every failure has already been asked about when it happened, so the run ends as soon as the last stage is done.
+- **Unchanged:**
+  - it never asks without a terminal (CI, `| tee`, nohup) or after Ctrl+C
+  - `--ui tui` never shows the `[y/N]` question; `r` covers it
+  - a retry is always a full clean build, also in an `--incremental` run
+
+### Details
+- **Several failures:**
+  - several stages fail in the same poll (e.g. tz and xbl): one question per stage, in pipeline order, as today
+  - a stage fails while a question is open: it's asked about right after the current question
+- **Stages that finish while the question is open:**
+  - The question waits for input with `select()` in 0.5 s steps. Each step the scheduler reaps finished stages. This keeps their end time, duration and log footer correct (otherwise QSSI's duration would include however long you took to answer).
+  - Nothing new is started while the question is open. Nothing could be anyway: the failed stage blocks super, and every first-wave stage is already running.
+  - The table isn't redrawn during the question; it shows the new states once it resumes.
+- **The last stage fails and you answer no:** the table isn't restarted; the summary is printed straight away.
+
+### Design
+- `scheduler.py`:
+  - `_poll_until_done()`: after `_reap()`, collect FAILED stages that haven't been asked about yet. They're tracked as `(name, attempt)`, so a new attempt is asked about again. Then call `_offer_retry()` unless the run is interrupted, there's no prompt (not a terminal), or `display.handles_retry` (TUI).
+  - `_offer_retry(failed)`: `display.pause()` → prompt → `retry()` for each `y` → `display.resume()`.
+  - The end-of-run prompt loop in `run()` is removed.
+  - Our SIGINT/SIGTERM handler stays installed during the question (it used to be swapped for the default). Each 0.5 s step, `idle()` sees the Ctrl+C. With stages running it stops asking and the normal cancel path takes over; with nothing running it clears the Ctrl+C, so it only ends the question.
+- `cli.make_retry_prompt`:
+  - new signature: `prompt(failed, running, idle) -> List[str]`
+  - prints the `still running: …` line
+  - waits for input with `select(stdin, 0.5)` and calls `idle()` each step; `idle()` reaps and returns True after Ctrl+C
+  - discards type-ahead (`termios.tcflush`) before asking: keys pressed during the build, such as a stray Enter or `y`, must not answer a question that can delete `out/`
+- `display/base.py`:
+  - new `Display.pause(stages)`, defaulting to a no-op (plain)
+  - `resume()` prints `Retrying: …` only when something was retried
+- `rich_display.py`: `pause()` stops `Live` (transient) and prints the current table once with `console.print(self._render())`.
+- `ansi_display.py`: `pause()` draws the table one last time, keeps it on screen (`_drawn = 0`) and shows the cursor. `resume()` hides it again.
+
+### Files
+- `orchestrator/scheduler.py`, `orchestrator/cli.py`, `orchestrator/display/base.py`, `rich_display.py`, `ansi_display.py`
+- `README.md` ("Retrying a failed stage"), section 13 of this file
+- tests (`test_retry.py`; `FakePrompt` gets the new signature):
+  - a stage that fails fast while another is still running is offered **before** the other one finishes
+  - `y` restarts it while the other stage is still RUNNING, and super/meta then run
+  - `n` is final: no second question at the end, exit 1
+  - a stage that completes during the question keeps an accurate duration
+  - Ctrl+C (`request_cancel()`) during the question: no retry, running stages get SIGTERM, exit 130
+  - existing: repeated failure is asked again, no question when not interactive, none after interrupt, TUI never asked
+- pty smoke test: `--ui ansi --stub` with `ICB_STUB_FAIL=vendor` and a slow qssi; the question shows while qssi is RUNNING
+
+### Verification
+Full suite on Python 3.13 and 3.8, plus manually with `--stub --ui rich` and `--ui ansi`, `ICB_STUB_FAIL=vendor`: answer `y`, `n` and Ctrl+C while qssi is still running.
+
+### Decided after review
+- **Ctrl+C when nothing else is running:** keep the old behaviour, which stops asking and exits with 1.
+
+### Found while implementing
+- **Type-ahead.** With the question appearing mid-build, input typed earlier would answer it straight away (Enter = no, `y` = delete `out/` and rebuild). The prompt now discards pending input before asking. The pty test `test_keys_typed_before_the_question_are_ignored` covers it.
+- **Test helpers.** The pty helpers in `tests/test_tui.py` moved into a `PtyTestCase` base class (`ui = "tui"`), so the retry pty tests can run `--ui ansi` and `--ui rich` (skipped when rich isn't installed).
